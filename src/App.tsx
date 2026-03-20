@@ -21,7 +21,8 @@ const WICKET_TYPES = [
 function OverlayWidget() {
   const [data, setData] = useState<any>(null);
   const params = new URLSearchParams(window.location.search);
-  const style = parseInt(params.get('style') || '1');
+  const styleParam = params.get('style') || '1';
+  const style = styleParam === 'scorecard' ? 'scorecard' : parseInt(styleParam);
   const matchId = window.location.pathname.split('/')[2];
 
   const getBallChip = (b: any) => {
@@ -436,7 +437,167 @@ function OverlayWidget() {
     </div>
   );
 
-  // ── Style 10: Overlay Selector (preview all) ──
+  // ── Scorecard Overlay (WC style horizontal bar) ──
+  if (style === 'scorecard') {
+    const inn1 = data.innings?.[0];
+    const inn2 = data.innings?.[1];
+    const battingTeam1 = inn1?.batting_team_id === match.team1_id ? match.team1_name : match.team2_name;
+    const battingTeam2 = inn2?.batting_team_id === match.team1_id ? match.team1_name : match.team2_name;
+    const matchStatus = match.status === 'completed' ? (match.result_note || 'Match Complete') : 'LIVE';
+    const isLive = match.status === 'live';
+
+    // Get top batsmen from scorecard API (use data from balls)
+    const getBatsmen = (inningsId: number) => {
+      const inningsBalls = data.allBalls.filter((b: any) => b.innings_id === inningsId);
+      const bMap: any = {};
+      inningsBalls.forEach((b: any) => {
+        if (!bMap[b.batsman_id]) bMap[b.batsman_id] = { id: b.batsman_id, runs: 0, balls: 0, fours: 0, sixes: 0 };
+        bMap[b.batsman_id].runs += b.runs_batter;
+        if (!['wide'].includes(b.extras_type || '')) bMap[b.batsman_id].balls++;
+        if (b.runs_batter === 4) bMap[b.batsman_id].fours++;
+        if (b.runs_batter === 6) bMap[b.batsman_id].sixes++;
+      });
+      return Object.values(bMap)
+        .sort((a: any, b: any) => b.runs - a.runs)
+        .slice(0, 3)
+        .map((p: any) => ({ ...p, name: data.allPlayers.find((pl: any) => pl.id === p.id)?.name || 'Unknown' }));
+    };
+
+    const getBowlers = (inningsId: number) => {
+      const inningsBalls = data.allBalls.filter((b: any) => b.innings_id === inningsId);
+      const bMap: any = {};
+      inningsBalls.forEach((b: any) => {
+        if (!bMap[b.bowler_id]) bMap[b.bowler_id] = { id: b.bowler_id, runs: 0, balls: 0, wickets: 0 };
+        bMap[b.bowler_id].runs += b.runs_batter + b.extras_runs;
+        if (!['wide', 'no_ball'].includes(b.extras_type || '')) bMap[b.bowler_id].balls++;
+        if (b.is_wicket) bMap[b.bowler_id].wickets++;
+      });
+      return Object.values(bMap)
+        .sort((a: any, b: any) => b.wickets - a.wickets || a.runs - b.runs)
+        .slice(0, 2)
+        .map((p: any) => ({ ...p, name: data.allPlayers.find((pl: any) => pl.id === p.id)?.name || 'Unknown' }));
+    };
+
+    const batsmen1 = inn1 ? getBatsmen(inn1.id) : [];
+    const batsmen2 = inn2 ? getBatsmen(inn2.id) : [];
+    const bowlers1 = inn1 ? getBowlers(inn1.id) : [];
+    const bowlers2 = inn2 ? getBowlers(inn2.id) : [];
+
+    return (
+      <div style={{ ...S, minHeight: '100vh', background: 'transparent', display: 'flex', alignItems: 'flex-end' }}>
+        <div style={{ width: '100%', background: 'rgba(10,10,20,0.97)', borderTop: '4px solid #7c3aed', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+
+          {/* Top header strip */}
+          <div style={{ background: 'linear-gradient(90deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)', padding: '6px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ background: '#7c3aed', color: '#fff', fontSize: 9, fontWeight: 900, padding: '2px 8px', borderRadius: 3, letterSpacing: 2 }}>SCORECARD</span>
+              <span style={{ color: '#c4b5fd', fontSize: 10, fontWeight: 600 }}>{match.team1_name} vs {match.team2_name}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isLive && <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4ade80', fontSize: 9, fontWeight: 900 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />LIVE</span>}
+              <span style={{ color: '#a78bfa', fontSize: 10 }}>{match.overs_per_innings} OVERS</span>
+            </div>
+          </div>
+
+          {/* Main scorecard body */}
+          <div style={{ display: 'grid', gridTemplateColumns: inn2 ? '1fr 1fr' : '1fr', gap: 0 }}>
+
+            {/* Innings 1 */}
+            {inn1 && (
+              <div style={{ padding: '10px 16px', borderRight: inn2 ? '1px solid rgba(124,58,237,0.3)' : 'none' }}>
+                {/* Team score header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid rgba(124,58,237,0.4)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #dc2626, #991b1b)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900, color: '#fff' }}>
+                      {battingTeam1.slice(0, 2).toUpperCase()}
+                    </div>
+                    <span style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>{battingTeam1}</span>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ color: '#fff', fontSize: 22, fontWeight: 900 }}>{inn1.total_runs}/{inn1.total_wickets}</span>
+                    <span style={{ color: '#94a3b8', fontSize: 10, marginLeft: 6 }}>({Math.floor(inn1.total_balls/6)}.{inn1.total_balls%6} ov)</span>
+                  </div>
+                </div>
+                {/* Top batsmen */}
+                <div style={{ marginBottom: 6 }}>
+                  {batsmen1.map((b: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span style={{ color: i === 0 ? '#fde68a' : '#cbd5e1', fontSize: 11, fontWeight: i === 0 ? 700 : 500 }}>{b.name}{i === 0 ? ' *' : ''}</span>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ color: '#fff', fontSize: 12, fontWeight: 800 }}>{b.runs}</span>
+                        <span style={{ color: '#64748b', fontSize: 9 }}> ({b.balls})</span>
+                        {b.fours > 0 && <span style={{ color: '#60a5fa', fontSize: 9 }}> {b.fours}×4</span>}
+                        {b.sixes > 0 && <span style={{ color: '#c084fc', fontSize: 9 }}> {b.sixes}×6</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Top bowlers */}
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {bowlers1.map((b: any, i: number) => (
+                    <div key={i} style={{ color: '#94a3b8', fontSize: 9 }}>
+                      <span style={{ color: '#a78bfa', fontWeight: 700 }}>{b.name}</span>
+                      <span style={{ marginLeft: 4 }}>{Math.floor(b.balls/6)}.{b.balls%6}-{b.runs}-<span style={{ color: '#4ade80', fontWeight: 800 }}>{b.wickets}W</span></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Innings 2 */}
+            {inn2 && (
+              <div style={{ padding: '10px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid rgba(59,130,246,0.4)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900, color: '#fff' }}>
+                      {battingTeam2.slice(0, 2).toUpperCase()}
+                    </div>
+                    <span style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>{battingTeam2}</span>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ color: '#fff', fontSize: 22, fontWeight: 900 }}>{inn2.total_runs}/{inn2.total_wickets}</span>
+                    <span style={{ color: '#94a3b8', fontSize: 10, marginLeft: 6 }}>({Math.floor(inn2.total_balls/6)}.{inn2.total_balls%6} ov)</span>
+                    {target && inn2.total_runs < target && <div style={{ color: '#fbbf24', fontSize: 9 }}>Need {target - inn2.total_runs} runs</div>}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                  {batsmen2.map((b: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span style={{ color: i === 0 ? '#fde68a' : '#cbd5e1', fontSize: 11, fontWeight: i === 0 ? 700 : 500 }}>{b.name}{i === 0 ? ' *' : ''}</span>
+                      <div>
+                        <span style={{ color: '#fff', fontSize: 12, fontWeight: 800 }}>{b.runs}</span>
+                        <span style={{ color: '#64748b', fontSize: 9 }}> ({b.balls})</span>
+                        {b.fours > 0 && <span style={{ color: '#60a5fa', fontSize: 9 }}> {b.fours}×4</span>}
+                        {b.sixes > 0 && <span style={{ color: '#c084fc', fontSize: 9 }}> {b.sixes}×6</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {bowlers2.map((b: any, i: number) => (
+                    <div key={i} style={{ color: '#94a3b8', fontSize: 9 }}>
+                      <span style={{ color: '#a78bfa', fontWeight: 700 }}>{b.name}</span>
+                      <span style={{ marginLeft: 4 }}>{Math.floor(b.balls/6)}.{b.balls%6}-{b.runs}-<span style={{ color: '#4ade80', fontWeight: 800 }}>{b.wickets}W</span></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom status bar */}
+          <div style={{ background: 'rgba(124,58,237,0.2)', padding: '5px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(124,58,237,0.3)' }}>
+            <span style={{ color: '#c4b5fd', fontSize: 9, fontWeight: 600 }}>{matchStatus}</span>
+            {striker.player && <span style={{ color: '#fde68a', fontSize: 9 }}>{striker.player.name}* {striker.stats.runs}({striker.stats.balls})</span>}
+            {bowler.player && <span style={{ color: '#86efac', fontSize: 9 }}>{bowler.player.name}: {Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6}-{bowler.stats.runs}-{bowler.stats.wickets}W</span>}
+            <span style={{ color: '#64748b', fontSize: 9 }}>CRR: {runRate}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Style 10: Overlay Selector ──
   return (
     <div style={{ ...S, minHeight: '100vh', background: '#0f172a', padding: 20, color: '#fff' }}>
       <h1 style={{ fontSize: 20, fontWeight: 900, color: '#4ade80', marginBottom: 6 }}>🎨 Cricket Overlay Styles</h1>
@@ -452,6 +613,7 @@ function OverlayWidget() {
           { n: 7, name: 'Minimal Top Bar', color: '#22c55e' },
           { n: 8, name: 'Orange Cricket', color: '#f97316' },
           { n: 9, name: 'Teal/Cyan Modern', color: '#14b8a6' },
+          { n: 'scorecard', name: 'Scorecard Overlay (WC Style)', color: '#7c3aed' },
         ].map(s => (
           <a key={s.n} href={`?style=${s.n}`} target="_blank"
             style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#1e293b', borderRadius: 10, border: `2px solid ${s.color}30`, textDecoration: 'none', color: '#fff', transition: 'all 0.2s' }}>
@@ -642,20 +804,32 @@ const OverSummaryModal = ({ summary, onClose }: { summary: any; onClose: () => v
 // ─── Sliding Ticker ───────────────────────────────────────────────────────────
 function SlidingTicker({ items }: { items: string[] }) {
   const [idx, setIdx] = useState(0);
-  const [fade, setFade] = useState(true);
+  const [visible, setVisible] = useState(true);
   useEffect(() => {
     if (items.length <= 1) return;
     const t = setInterval(() => {
-      setFade(false);
-      setTimeout(() => { setIdx(i => (i + 1) % items.length); setFade(true); }, 300);
+      setVisible(false);
+      setTimeout(() => {
+        setIdx(i => (i + 1) % items.length);
+        setVisible(true);
+      }, 400);
     }, 3500);
     return () => clearInterval(t);
   }, [items.length]);
   if (!items.length) return null;
   return (
-    <div className="text-center mt-2">
-      <span style={{ transition: 'opacity 0.3s', opacity: fade ? 1 : 0 }}
-        className="bg-white/10 px-3 py-1 rounded-full text-xs text-green-300 font-semibold inline-block">
+    <div style={{ textAlign: 'center', marginTop: 6, minHeight: 22 }}>
+      <span style={{
+        display: 'inline-block',
+        background: 'rgba(255,255,255,0.1)',
+        padding: '2px 12px',
+        borderRadius: 20,
+        fontSize: 11,
+        color: '#86efac',
+        fontWeight: 600,
+        opacity: visible ? 1 : 0,
+        transition: 'opacity 0.4s ease',
+      }}>
         {items[idx]}
       </span>
     </div>
@@ -1032,9 +1206,15 @@ export default function App() {
           </div>
           <p className="text-center font-bold text-green-900">{activeMatch.team1_name} vs {activeMatch.team2_name}</p>
           {activeInnings && <p className="text-center text-3xl font-black text-green-700 mt-1">{activeInnings.total_runs}/{activeInnings.total_wickets} <span className="text-base font-normal text-green-400">({currentOver}.{currentBall} ov)</span></p>}
-          <div className="flex gap-2 mt-4">
+          {/* Match ID — for overlay URL */}
+          <div className="mt-2 bg-green-50 rounded-lg px-3 py-2 flex items-center justify-between">
+            <span className="text-xs text-green-600 font-semibold">Match ID: <span className="font-black text-green-800">#{activeMatch.id}</span></span>
+            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/overlay/${activeMatch.id}?style=1`); showToast('Overlay URL copied!'); }}
+              className="text-xs text-green-600 underline hover:text-green-800">Copy Overlay URL</button>
+          </div>
+          <div className="flex gap-2 mt-3">
             <Btn variant="primary" className="flex-1" onClick={() => setView('scoring')}><Play size={15} /> Score</Btn>
-            <Btn variant="outline" onClick={() => window.open(`/overlay/${activeMatch.id}`, '_blank')}><Tv2 size={15} /></Btn>
+            <Btn variant="outline" onClick={() => window.open(`/overlay/${activeMatch.id}?style=10`, '_blank')}><Tv2 size={15} /> Overlays</Btn>
             <Btn variant="outline" onClick={fetchScorecard}><BarChart3 size={15} /></Btn>
           </div>
         </Card>
@@ -1326,7 +1506,29 @@ export default function App() {
                   <span className={`text-xs font-bold ${activeMatch.facebook_live_id ? 'text-blue-600' : 'text-gray-400'}`}>{activeMatch.facebook_live_id ? '● LIVE' : 'Off'}</span>
                 </div>
               </div>
-              <Btn variant="outline" size="sm" className="w-full mt-3" onClick={() => window.open(`/overlay/${activeMatch.id}`, '_blank')}><Tv2 size={13} /> OBS Overlay</Btn>
+              {/* OBS Overlay Style Dropdown */}
+              <div className="mt-3 space-y-1.5">
+                <p className="text-xs font-semibold text-green-700 flex items-center gap-1"><Tv2 size={12} /> OBS Overlay Style</p>
+                <select id="overlayStyleSelect" className="w-full px-2 py-2 border border-green-200 rounded-lg text-xs text-green-800 bg-white">
+                  <option value="1">🟢 Style 1 — Classic Green</option>
+                  <option value="2">🔵 Style 2 — Blue Premium</option>
+                  <option value="3">🔴 Style 3 — Red Hot (IPL)</option>
+                  <option value="4">🟡 Style 4 — Gold Luxury</option>
+                  <option value="5">🟣 Style 5 — Purple Neon</option>
+                  <option value="6">⚪ Style 6 — White Sports TV</option>
+                  <option value="7">➖ Style 7 — Minimal Top Bar</option>
+                  <option value="8">🟠 Style 8 — Orange Cricket</option>
+                  <option value="9">🩵 Style 9 — Teal Modern</option>
+                  <option value="scorecard">📊 Scorecard Overlay</option>
+                </select>
+                <Btn variant="outline" size="sm" className="w-full" onClick={() => {
+                  const sel = (document.getElementById('overlayStyleSelect') as HTMLSelectElement).value;
+                  const url = sel === 'scorecard'
+                    ? `/overlay/${activeMatch.id}?style=scorecard`
+                    : `/overlay/${activeMatch.id}?style=${sel}`;
+                  window.open(url, '_blank');
+                }}><Tv2 size={13} /> Open in OBS</Btn>
+              </div>
             </Card>
             <Card className="p-4">
               <h3 className="font-bold text-green-900 text-xs mb-3">Recent Balls</h3>
@@ -1357,7 +1559,7 @@ export default function App() {
 
   // ─── Scorecard (dark theme like reference) ────────────────────────────────────
   const renderScorecard = () => (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3">
+    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-3">
       <div className="bg-gray-900 text-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-5 py-3 bg-gray-800 border-b border-gray-700">
           <h2 className="text-base font-bold text-white flex items-center gap-2">📋 Match Scorecard</h2>
