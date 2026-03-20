@@ -194,6 +194,8 @@ function OverlayWidget() {
                   if (b.is_wicket) { label = 'W'; bg = '#ef4444'; }
                   else if (b.extras_type === 'wide') { label = b.extras_runs > 1 ? `W+${b.extras_runs-1}` : 'Wd'; bg = '#eab308'; color = '#422006'; }
                   else if (b.extras_type === 'no_ball') { label = b.runs_batter > 0 ? `N+${b.runs_batter}` : 'Nb'; bg = '#f97316'; }
+                  else if (b.extras_type === 'bye') { label = b.extras_runs > 0 ? `B${b.extras_runs}` : 'B'; bg = '#0d9488'; }
+                  else if (b.extras_type === 'leg_bye') { label = b.extras_runs > 0 ? `L${b.extras_runs}` : 'Lb'; bg = '#0891b2'; }
                   else if (b.runs_batter === 6) { bg = '#7c3aed'; }
                   else if (b.runs_batter === 4) { bg = '#2563eb'; }
                   return (
@@ -424,6 +426,10 @@ export default function App() {
   const [showScorecard, setShowScorecard] = useState(false);
   const [overSummary, setOverSummary] = useState<any | null>(null);
   const [scorecard, setScorecard] = useState<any[]>([]);
+  const [showPlayerStats, setShowPlayerStats] = useState(false);
+  const [playerStats, setPlayerStats] = useState<any>(null);
+  const [playerStatsName, setPlayerStatsName] = useState('');
+  const [partnership, setPartnership] = useState<number>(0);
   const [isYouTubeConnected, setIsYouTubeConnected] = useState(false);
   const [youtubeBroadcasts, setYoutubeBroadcasts] = useState<any[]>([]);
   const [selectedBroadcastId, setSelectedBroadcastId] = useState('');
@@ -482,6 +488,13 @@ export default function App() {
     const d: Ball[] = await r.json();
     setBalls(d);
     setIsFreeHit(d.length > 0 && d[0].extras_type === 'no_ball');
+    // Compute current partnership (runs since last wicket)
+    let pRuns = 0;
+    for (const b of [...d].reverse()) {
+      if (b.is_wicket) break;
+      pRuns += b.runs_batter + b.extras_runs;
+    }
+    setPartnership(pRuns);
   };
 
   const createTeam = async () => {
@@ -675,6 +688,13 @@ export default function App() {
     setScorecard(await r.json()); setShowScorecard(true);
   };
 
+  const fetchPlayerStats = async (playerId: number, name: string) => {
+    const r = await fetch(`/api/players/${playerId}/stats`);
+    setPlayerStats(await r.json());
+    setPlayerStatsName(name);
+    setShowPlayerStats(true);
+  };
+
   // ─── Computed ────────────────────────────────────────────────────────────────
   const currentOver = activeInnings ? Math.floor(activeInnings.total_balls / 6) : 0;
   const currentBall = activeInnings ? activeInnings.total_balls % 6 : 0;
@@ -712,6 +732,8 @@ export default function App() {
     if (b.is_wicket) return { label: 'W', cls: 'bg-red-500 text-white' };
     if (b.extras_type === 'wide') return { label: b.extras_runs > 1 ? `Wd+${b.extras_runs - 1}` : 'Wd', cls: 'bg-yellow-400 text-yellow-900' };
     if (b.extras_type === 'no_ball') return { label: b.runs_batter > 0 ? `Nb+${b.runs_batter}` : 'Nb', cls: 'bg-orange-400 text-white' };
+    if (b.extras_type === 'bye') return { label: b.extras_runs > 0 ? `B${b.extras_runs}` : 'B', cls: 'bg-teal-500 text-white' };
+    if (b.extras_type === 'leg_bye') return { label: b.extras_runs > 0 ? `Lb${b.extras_runs}` : 'Lb', cls: 'bg-cyan-500 text-white' };
     if (b.extras_type === 'penalty') return { label: 'P5', cls: 'bg-gray-500 text-white' };
     if (b.runs_batter === 6) return { label: '6', cls: 'bg-purple-500 text-white' };
     if (b.runs_batter === 4) return { label: '4', cls: 'bg-blue-500 text-white' };
@@ -887,20 +909,30 @@ export default function App() {
             </div>
           </div>
 
-          {/* Batsmen live stats */}
+          {/* Batsmen live stats — tap to view career stats */}
           <div className="mt-3 grid grid-cols-2 gap-2">
             {[[strikerId, strikerPlayer, strikerStats, true], [nonStrikerId, nonStrikerPlayer, nonStrikerStats, false]].map(([id, player, stats, isStriker]: any) =>
               player ? (
-                <div key={String(id)} className="bg-white/10 rounded-xl px-3 py-2">
+                <button key={String(id)} onClick={() => fetchPlayerStats(player.id, player.name)}
+                  className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 text-left transition-all cursor-pointer">
                   <div className="flex items-center gap-1">
+                    {isStriker && <span className="text-yellow-400 text-xs font-black">▶</span>}
                     <span className="text-xs font-bold truncate">{player.name}</span>
                     {isStriker && <span className="text-yellow-400 text-xs">*</span>}
                   </div>
                   {stats && <span className="text-green-300 text-xs">{stats.runs} <span className="opacity-70">({stats.balls})</span>{stats.fours > 0 && <span className="text-blue-300 ml-1">{stats.fours}×4</span>}{stats.sixes > 0 && <span className="text-purple-300 ml-1">{stats.sixes}×6</span>}</span>}
-                </div>
+                </button>
               ) : null
             )}
           </div>
+          {/* Partnership */}
+          {partnership > 0 && strikerPlayer && nonStrikerPlayer && (
+            <div className="mt-2 text-center">
+              <span className="bg-white/10 px-3 py-1 rounded-full text-xs text-green-300 font-semibold">
+                Partnership: {partnership} runs
+              </span>
+            </div>
+          )}
 
           {/* This over */}
           <div className="mt-3">
@@ -1109,6 +1141,58 @@ export default function App() {
         />
       )}
       {overSummary && <OverSummaryModal summary={overSummary} onClose={() => setOverSummary(null)} />}
+
+      {/* Player Stats Modal */}
+      {showPlayerStats && playerStats && (
+        <Modal title={`${playerStatsName} — Career Stats`} onClose={() => setShowPlayerStats(false)}>
+          <div className="space-y-5">
+            {/* Batting */}
+            <div>
+              <h3 className="font-bold text-green-800 text-sm mb-3 flex items-center gap-2">🏏 Batting</h3>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { label: 'Innings', value: playerStats.batting.innings },
+                  { label: 'Runs', value: playerStats.batting.runs },
+                  { label: 'Average', value: playerStats.batting.average },
+                  { label: 'Strike Rate', value: playerStats.batting.strikeRate },
+                  { label: 'Balls Faced', value: playerStats.batting.ballsFaced },
+                  { label: 'Dismissals', value: playerStats.batting.dismissals },
+                  { label: '50s', value: playerStats.batting.fifties },
+                  { label: '100s', value: playerStats.batting.hundreds },
+                  { label: 'Ducks', value: playerStats.batting.ducks },
+                  { label: 'Fours', value: playerStats.batting.fours },
+                  { label: 'Sixes', value: playerStats.batting.sixes },
+                ].map(s => (
+                  <div key={s.label} className="bg-green-50 rounded-xl p-3 text-center">
+                    <p className="text-xl font-black text-green-700">{s.value}</p>
+                    <p className="text-xs text-green-500 font-semibold">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Bowling */}
+            <div>
+              <h3 className="font-bold text-green-800 text-sm mb-3 flex items-center gap-2">🎯 Bowling</h3>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: 'Wickets', value: playerStats.bowling.wickets },
+                  { label: 'Runs', value: playerStats.bowling.runsConceded },
+                  { label: 'Economy', value: playerStats.bowling.economy },
+                  { label: 'Average', value: playerStats.bowling.average },
+                  { label: 'Balls', value: playerStats.bowling.balls },
+                  { label: 'Wides', value: playerStats.bowling.wides },
+                  { label: 'No Balls', value: playerStats.bowling.noBalls },
+                ].map(s => (
+                  <div key={s.label} className="bg-green-50 rounded-xl p-3 text-center">
+                    <p className="text-xl font-black text-green-700">{s.value}</p>
+                    <p className="text-xs text-green-500 font-semibold">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
       {toast && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm font-semibold shadow-lg flex items-center gap-2 ${toast.type === 'success' ? 'bg-green-700 text-white' : 'bg-red-600 text-white'}`}>
           {toast.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}<span>{toast.msg}</span>
