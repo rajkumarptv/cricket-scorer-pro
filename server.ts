@@ -120,6 +120,11 @@ function buildScoreText(match: any) {
   return `${match.team1_name} vs ${match.team2_name} | ${match.total_runs}/${match.total_wickets} (${overs} ov)`;
 }
 
+// Helper
+function groupBy(arr: any[], key: string) {
+  return arr.reduce((g, item) => { (g[item[key]] = g[item[key]] || []).push(item); return g; }, {});
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -344,7 +349,73 @@ async function startServer() {
     res.json(scorecard);
   });
 
-  // ── Serve built React app ─────────────────────────────────────────────────────
+  // ── Partnership stats ─────────────────────────────────────────────────────────
+  app.get('/api/innings/:id/partnership', (req, res) => {
+    const balls: any[] = db.prepare('SELECT * FROM balls WHERE innings_id = ? ORDER BY id ASC').all(req.params.id);
+    const partnerships: any[] = [];
+    let currentPartnership = { batsman1: 0, batsman2: 0, runs: 0, balls: 0, b1Runs: 0, b2Runs: 0 };
+
+    balls.forEach(b => {
+      if (b.is_wicket) {
+        partnerships.push({ ...currentPartnership });
+        currentPartnership = { batsman1: b.non_striker_id, batsman2: 0, runs: 0, balls: 0, b1Runs: 0, b2Runs: 0 };
+      } else {
+        if (!currentPartnership.batsman1) currentPartnership.batsman1 = b.batsman_id;
+        if (!currentPartnership.batsman2) currentPartnership.batsman2 = b.non_striker_id;
+        const total = (b.runs_batter || 0) + (b.extras_runs || 0);
+        currentPartnership.runs += total;
+        if (!['wide', 'no_ball'].includes(b.extras_type || '')) currentPartnership.balls++;
+        if (b.batsman_id === currentPartnership.batsman1) currentPartnership.b1Runs += b.runs_batter;
+        else currentPartnership.b2Runs += b.runs_batter;
+      }
+    });
+    if (currentPartnership.batsman1) partnerships.push(currentPartnership);
+    res.json(partnerships);
+  });
+
+  // ── Player career stats ───────────────────────────────────────────────────────
+  app.get('/api/players/:id/stats', (req, res) => {
+    const playerId = req.params.id;
+    const battingBalls: any[] = db.prepare('SELECT * FROM balls WHERE batsman_id = ?').all(playerId);
+    const bowlingBalls: any[] = db.prepare('SELECT * FROM balls WHERE bowler_id = ?').all(playerId);
+
+    // Batting
+    const runs = battingBalls.reduce((s, b) => s + (b.runs_batter || 0), 0);
+    const ballsFaced = battingBalls.filter(b => !['wide'].includes(b.extras_type || '')).length;
+    const fours = battingBalls.filter(b => b.runs_batter === 4).length;
+    const sixes = battingBalls.filter(b => b.runs_batter === 6).length;
+    const dismissals = battingBalls.filter(b => b.is_wicket).length;
+
+    // Group by innings for 50s/100s
+    const inningsGroups: { [k: string]: any[] } = {};
+    battingBalls.forEach(b => { if (!inningsGroups[b.innings_id]) inningsGroups[b.innings_id] = []; inningsGroups[b.innings_id].push(b); });
+    let fifties = 0, hundreds = 0, ducks = 0;
+    Object.values(inningsGroups).forEach(innBalls => {
+      const innRuns = innBalls.reduce((s, b) => s + b.runs_batter, 0);
+      if (innRuns >= 100) hundreds++;
+      else if (innRuns >= 50) fifties++;
+      if (innRuns === 0 && innBalls.some(b => b.is_wicket)) ducks++;
+    });
+
+    // Bowling
+    const wickets = bowlingBalls.filter(b => b.is_wicket && !['retired', 'retired_hurt', 'timed_out'].includes(b.wicket_type || '')).length;
+    const validBowlingBalls = bowlingBalls.filter(b => !['wide', 'no_ball'].includes(b.extras_type || '')).length;
+    const runsConceded = bowlingBalls.reduce((s, b) => s + b.runs_batter + (b.extras_runs || 0), 0);
+    const wides = bowlingBalls.filter(b => b.extras_type === 'wide').length;
+    const noBalls = bowlingBalls.filter(b => b.extras_type === 'no_ball').length;
+
+    res.json({
+      batting: { innings: Object.keys(inningsGroups).length, runs, ballsFaced, fours, sixes, dismissals, average: dismissals ? (runs / dismissals).toFixed(1) : runs, strikeRate: ballsFaced ? ((runs / ballsFaced) * 100).toFixed(1) : '0.0', fifties, hundreds, ducks },
+      bowling: { innings: Object.keys(groupBy(bowlingBalls, 'innings_id')).length, wickets, balls: validBowlingBalls, runsConceded, average: wickets ? (runsConceded / wickets).toFixed(1) : '-', economy: validBowlingBalls ? ((runsConceded / validBowlingBalls) * 6).toFixed(1) : '0.0', wides, noBalls }
+    });
+  });
+
+  app.get('/api/teams/:id/stats', (req, res) => {
+    const players: any[] = db.prepare('SELECT * FROM players WHERE team_id = ?').all(req.params.id);
+    res.json(players);
+  });
+
+
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
   app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
