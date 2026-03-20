@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+:root {
+  --green-primary: #16a34a;
+  --green-dark: #14532d;
+  --green-light: #bbf7d0;
+  --green-mid: #22c55e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.btn-ball {
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-ball:active {
+  transform: scale(0.93);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  background: #22c55e;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+.ball-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+select, input {
+  outline: none;
+}
+
+select:focus, input:focus {
+  ring: 2px solid #16a34a;
+}
+
+/* Overlay transparent background */
+.overlay-root {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #f0fdf4;
+}
+::-webkit-scrollbar-thumb {
+  background: #86efac;
+  border-radius: 4px;
+}
