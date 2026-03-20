@@ -17,6 +17,222 @@ const WICKET_TYPES = [
   { id: 'timed_out', label: 'Timed Out', needsTaker: false },
 ];
 
+// ─── Overlay Widget (self-contained, fetches own data) ────────────────────────
+function OverlayWidget() {
+  const [data, setData] = useState<any>(null);
+
+  const matchId = window.location.pathname.split('/')[2];
+
+  const getBallChip = (b: any) => {
+    if (b.is_wicket) return { label: 'W', cls: 'bg-red-500 text-white' };
+    if (b.extras_type === 'wide') return { label: b.extras_runs > 1 ? `Wd+${b.extras_runs - 1}` : 'Wd', cls: 'bg-yellow-400 text-yellow-900' };
+    if (b.extras_type === 'no_ball') return { label: b.runs_batter > 0 ? `Nb+${b.runs_batter}` : 'Nb', cls: 'bg-orange-400 text-white' };
+    if (b.runs_batter === 6) return { label: '6', cls: 'bg-purple-500 text-white' };
+    if (b.runs_batter === 4) return { label: '4', cls: 'bg-blue-400 text-white' };
+    return { label: String(b.runs_batter), cls: 'bg-white/20 text-white' };
+  };
+
+  const fetchData = async () => {
+    try {
+      const [mRes, scRes] = await Promise.all([
+        fetch(`/api/matches/${matchId}`),
+        fetch(`/api/matches/${matchId}/scorecard`),
+      ]);
+      const match = await mRes.json();
+      const scorecard = await scRes.json();
+      if (!match || match.error) return;
+
+      const innings = match.innings || [];
+      const currInnings = innings[innings.length - 1];
+      if (!currInnings) return;
+
+      const ballsRes = await fetch(`/api/innings/${currInnings.id}/balls`);
+      const allBalls: any[] = await ballsRes.json();
+
+      const [t1Res, t2Res] = await Promise.all([
+        fetch(`/api/teams/${match.team1_id}/players`),
+        fetch(`/api/teams/${match.team2_id}/players`),
+      ]);
+      const team1Players: any[] = await t1Res.json();
+      const team2Players: any[] = await t2Res.json();
+      const allPlayers: any[] = [...team1Players, ...team2Players];
+
+      const currentOver = Math.floor(currInnings.total_balls / 6);
+      const currentBall = currInnings.total_balls % 6;
+      const thisOverBalls = allBalls.filter((b: any) => b.over_number === currentOver).reverse();
+
+      // Last striker/non-striker from most recent ball
+      const lastBall = allBalls[0];
+      const strikerId = lastBall?.batsman_id;
+      const nonStrikerId = lastBall?.non_striker_id;
+      const bowlerId = lastBall?.bowler_id;
+
+      const getBatsmanStats = (id: number) => {
+        const playerBalls = allBalls.filter((b: any) => b.batsman_id === id && b.extras_type !== 'wide');
+        return {
+          runs: playerBalls.reduce((s: number, b: any) => s + b.runs_batter, 0),
+          balls: playerBalls.length,
+          fours: playerBalls.filter((b: any) => b.runs_batter === 4).length,
+          sixes: playerBalls.filter((b: any) => b.runs_batter === 6).length,
+        };
+      };
+
+      const getBowlerStats = (id: number) => {
+        const bowlerBalls = allBalls.filter((b: any) => b.bowler_id === id);
+        return {
+          balls: bowlerBalls.filter((b: any) => !['wide', 'no_ball'].includes(b.extras_type || '')).length,
+          runs: bowlerBalls.reduce((s: number, b: any) => s + b.runs_batter + b.extras_runs, 0),
+          wickets: bowlerBalls.filter((b: any) => b.is_wicket).length,
+        };
+      };
+
+      // Partnership
+      const partnershipBalls = allBalls.filter((b: any) =>
+        (b.batsman_id === strikerId || b.batsman_id === nonStrikerId) &&
+        !b.is_wicket
+      );
+      const partnership = partnershipBalls.reduce((s: number, b: any) => s + b.runs_batter + b.extras_runs, 0);
+
+      // Run rate
+      const runRate = currInnings.total_balls > 0
+        ? ((currInnings.total_runs / currInnings.total_balls) * 6).toFixed(1)
+        : '0.0';
+
+      // Required run rate
+      const target = innings.length > 1 ? innings[0].total_runs + 1 : null;
+      const ballsLeft = match.overs_per_innings * 6 - currInnings.total_balls;
+      const rrr = target && ballsLeft > 0
+        ? (((target - currInnings.total_runs) / ballsLeft) * 6).toFixed(1)
+        : null;
+
+      setData({
+        match, innings, currInnings, allBalls, allPlayers,
+        currentOver, currentBall, thisOverBalls,
+        strikerId, nonStrikerId, bowlerId,
+        striker: { player: allPlayers.find(p => p.id === strikerId), stats: getBatsmanStats(strikerId) },
+        nonStriker: { player: allPlayers.find(p => p.id === nonStrikerId), stats: getBatsmanStats(nonStrikerId) },
+        bowler: { player: allPlayers.find(p => p.id === bowlerId), stats: getBowlerStats(bowlerId) },
+        partnership, runRate, rrr, target,
+      });
+    } catch (e) { console.error('Overlay fetch error', e); }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!data) return (
+    <div className="min-h-screen bg-transparent flex items-end p-0">
+      <div className="bg-green-900/90 text-green-400 px-6 py-3 text-sm font-bold rounded-t-xl">Loading overlay...</div>
+    </div>
+  );
+
+  const { match, currInnings, thisOverBalls, striker, nonStriker, bowler, partnership, runRate, rrr, target, currentOver, currentBall } = data;
+  const battingTeamName = currInnings?.batting_team_id === match.team1_id ? match.team1_name : match.team2_name;
+  const bowlingTeamName = currInnings?.batting_team_id === match.team1_id ? match.team2_name : match.team1_name;
+
+  return (
+    <div className="min-h-screen bg-transparent flex items-end">
+      <div style={{ fontFamily: 'system-ui, sans-serif', width: '100%', background: 'transparent' }}>
+        {/* Main overlay bar */}
+        <div style={{ display: 'flex', alignItems: 'stretch', background: 'rgba(5,40,10,0.96)', borderTop: '3px solid #22c55e', minHeight: 70 }}>
+
+          {/* LEFT: Batsmen */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 14px', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 160 }}>
+            {striker.player && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ color: '#facc15', fontSize: 9, fontWeight: 900 }}>▶</span>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>{striker.player.name}</span>
+                <span style={{ color: '#facc15', fontSize: 11, fontWeight: 900 }}>*</span>
+                <span style={{ color: '#86efac', fontSize: 12, fontWeight: 700, marginLeft: 4 }}>
+                  {striker.stats.runs}
+                  <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 400 }}> ({striker.stats.balls})</span>
+                  {striker.stats.fours > 0 && <span style={{ color: '#93c5fd', fontSize: 10 }}> {striker.stats.fours}×4</span>}
+                  {striker.stats.sixes > 0 && <span style={{ color: '#c4b5fd', fontSize: 10 }}> {striker.stats.sixes}×6</span>}
+                </span>
+              </div>
+            )}
+            {nonStriker.player && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: '#4ade80', fontSize: 9 }}>●</span>
+                <span style={{ color: '#d1fae5', fontSize: 12, fontWeight: 600 }}>{nonStriker.player.name}</span>
+                <span style={{ color: '#6ee7b7', fontSize: 12, fontWeight: 700, marginLeft: 4 }}>
+                  {nonStriker.stats.runs}
+                  <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 400 }}> ({nonStriker.stats.balls})</span>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* CENTER: Score */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 16px', background: 'rgba(22,101,52,0.6)' }}>
+            <div style={{ color: '#bbf7d0', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
+              {battingTeamName} vs {bowlingTeamName}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ color: '#fff', fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{currInnings?.total_runs ?? 0}</span>
+              <span style={{ color: '#4ade80', fontSize: 22, fontWeight: 700 }}>/{currInnings?.total_wickets ?? 0}</span>
+              <span style={{ color: '#86efac', fontSize: 13, fontWeight: 600, fontFamily: 'monospace' }}>({currentOver}.{currentBall})</span>
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
+              <span style={{ color: '#fde68a', fontSize: 10 }}>RR {runRate}</span>
+              {rrr && <span style={{ color: '#f87171', fontSize: 10 }}>RRR {rrr}</span>}
+              {target && <span style={{ color: '#fde68a', fontSize: 10 }}>Need {target - (currInnings?.total_runs || 0)}</span>}
+            </div>
+          </div>
+
+          {/* This over balls */}
+          {thisOverBalls.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ color: '#6ee7b7', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>THIS OVER</div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                {thisOverBalls.slice(-6).map((b: any, i: number) => {
+                  let label = String(b.runs_batter);
+                  let bg = 'rgba(255,255,255,0.15)'; let color = '#fff';
+                  if (b.is_wicket) { label = 'W'; bg = '#ef4444'; }
+                  else if (b.extras_type === 'wide') { label = b.extras_runs > 1 ? `W+${b.extras_runs-1}` : 'Wd'; bg = '#eab308'; color = '#422006'; }
+                  else if (b.extras_type === 'no_ball') { label = b.runs_batter > 0 ? `N+${b.runs_batter}` : 'Nb'; bg = '#f97316'; }
+                  else if (b.runs_batter === 6) { bg = '#7c3aed'; }
+                  else if (b.runs_batter === 4) { bg = '#2563eb'; }
+                  return (
+                    <div key={i} style={{ minWidth: 28, height: 28, borderRadius: '50%', background: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800 }}>
+                      {label}
+                    </div>
+                  );
+                })}
+              </div>
+              {partnership > 0 && <div style={{ color: '#86efac', fontSize: 9, marginTop: 3, textAlign: 'center' }}>P: {partnership}</div>}
+            </div>
+          )}
+
+          {/* RIGHT: Bowler */}
+          {bowler.player && (
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 14px', borderLeft: '1px solid rgba(255,255,255,0.1)', minWidth: 130 }}>
+              <div style={{ color: '#6ee7b7', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+              <div style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>{bowler.player.name}</div>
+              <div style={{ color: '#86efac', fontSize: 11, fontWeight: 600 }}>
+                {Math.floor(bowler.stats.balls / 6)}.{bowler.stats.balls % 6} ov &nbsp;
+                <span style={{ color: '#fca5a5' }}>{bowler.stats.runs}r</span> &nbsp;
+                <span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span>
+              </div>
+            </div>
+          )}
+
+          {/* LIVE badge */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', background: '#16a34a', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', animation: 'pulse 1.5s infinite' }} />
+              <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── UI ───────────────────────────────────────────────────────────────────────
 const Btn = ({ children, onClick, variant = 'primary', size = 'md', disabled = false, className = '' }: any) => {
   const v: any = {
@@ -807,64 +1023,9 @@ export default function App() {
     );
   };
 
-  // ─── Overlay (for OBS) ────────────────────────────────────────────────────────
+  // ─── Overlay (for OBS) — self-fetching ───────────────────────────────────────
   const renderOverlay = () => {
-    const bowlerName = bowlerId ? (bowlingTeamPlayers.find(p => p.id === bowlerId)?.name || '') : '';
-    return (
-      <div className="min-h-screen bg-transparent flex items-end p-4">
-        <div className="bg-green-900/96 backdrop-blur text-white rounded-2xl border border-green-700/50 shadow-2xl w-full max-w-3xl overflow-hidden">
-          {/* Top row - score */}
-          <div className="flex items-center gap-0">
-            <div className="bg-green-700 px-4 py-2 flex items-center gap-2">
-              <span className="live-dot" />
-              <span className="font-black text-sm uppercase tracking-wide">{activeMatch?.team1_name} vs {activeMatch?.team2_name}</span>
-            </div>
-            <div className="flex items-center gap-4 px-4 py-2">
-              <div>
-                <span className="text-3xl font-black">{activeInnings?.total_runs ?? 0}/{activeInnings?.total_wickets ?? 0}</span>
-                <span className="text-green-400 text-sm ml-2 font-mono">({currentOver}.{currentBall} ov)</span>
-              </div>
-              {target && <span className="text-yellow-300 text-sm font-bold">Need {target - (activeInnings?.total_runs || 0)}</span>}
-            </div>
-          </div>
-          {/* Bottom row - players */}
-          <div className="flex items-center gap-0 border-t border-green-800">
-            {/* Batsmen */}
-            <div className="flex gap-0 flex-1">
-              {strikerPlayer && (
-                <div className="px-3 py-1.5 border-r border-green-800">
-                  <div className="flex items-center gap-1">
-                    <span className="text-yellow-400 text-xs font-black">▶</span>
-                    <span className="text-xs font-bold">{strikerPlayer.name}</span>
-                    <span className="text-yellow-400 text-xs">*</span>
-                  </div>
-                  {strikerStats && <span className="text-green-300 text-xs">{strikerStats.runs} ({strikerStats.balls})</span>}
-                </div>
-              )}
-              {nonStrikerPlayer && (
-                <div className="px-3 py-1.5 border-r border-green-800">
-                  <span className="text-xs font-bold text-green-200">{nonStrikerPlayer.name}</span>
-                  {nonStrikerStats && <p className="text-green-400 text-xs">{nonStrikerStats.runs} ({nonStrikerStats.balls})</p>}
-                </div>
-              )}
-            </div>
-            {/* This over balls */}
-            {thisOverBalls.length > 0 && (
-              <div className="flex items-center gap-1 px-3 border-r border-green-800">
-                {thisOverBalls.slice(-6).map((b, i) => { const d = getBallDisplay(b); return <span key={i} className={`inline-flex items-center justify-center min-w-[28px] h-7 px-1 rounded-full text-xs font-bold ${d.cls}`}>{d.label}</span>; })}
-              </div>
-            )}
-            {/* Bowler */}
-            {bowlerName && currentBowlerStats && (
-              <div className="px-3 py-1.5">
-                <span className="text-xs font-bold text-green-200">{bowlerName}</span>
-                <p className="text-green-400 text-xs">{Math.floor(currentBowlerStats.balls / 6)}.{currentBowlerStats.balls % 6}-{currentBowlerStats.runs}-{currentBowlerStats.wickets}W</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+    return <OverlayWidget />;
   };
 
   // ─── Scorecard ───────────────────────────────────────────────────────────────
