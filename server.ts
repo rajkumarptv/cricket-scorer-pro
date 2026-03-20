@@ -415,6 +415,20 @@ async function startServer() {
     res.json(players);
   });
 
+  // ── Sample Data Seed ──────────────────────────────────────────────────────────
+  app.post('/api/seed', (req, res) => {
+    try {
+      const t1p = ['Rohit Sharma','Virat Kohli','Shubman Gill','KL Rahul','Hardik Pandya','Ravindra Jadeja','MS Dhoni','Jasprit Bumrah','Mohammed Shami','Kuldeep Yadav','Arshdeep Singh'];
+      const t2p = ['David Warner','Steve Smith','Marnus Labuschagne','Travis Head','Mitchell Marsh','Glenn Maxwell','Pat Cummins','Mitchell Starc','Josh Hazlewood','Adam Zampa','Cameron Green'];
+      let t1: any = db.prepare("SELECT id FROM teams WHERE name='India XI'").get();
+      let t2: any = db.prepare("SELECT id FROM teams WHERE name='Australia XI'").get();
+      if (!t1) { const r = db.prepare('INSERT INTO teams (name) VALUES (?)').run('India XI'); t1 = { id: r.lastInsertRowid }; }
+      if (!t2) { const r = db.prepare('INSERT INTO teams (name) VALUES (?)').run('Australia XI'); t2 = { id: r.lastInsertRowid }; }
+      t1p.forEach(n => { if (!db.prepare('SELECT id FROM players WHERE team_id=? AND name=?').get(t1.id, n)) db.prepare('INSERT INTO players (team_id, name) VALUES (?, ?)').run(t1.id, n); });
+      t2p.forEach(n => { if (!db.prepare('SELECT id FROM players WHERE team_id=? AND name=?').get(t2.id, n)) db.prepare('INSERT INTO players (team_id, name) VALUES (?, ?)').run(t2.id, n); });
+      res.json({ success: true, message: 'India XI & Australia XI added with 11 players each!' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
 
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
