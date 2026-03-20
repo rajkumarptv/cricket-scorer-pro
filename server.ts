@@ -62,12 +62,18 @@ db.exec(`
     extras_type TEXT,
     is_wicket INTEGER DEFAULT 0,
     wicket_type TEXT,
-    wicket_player_id INTEGER,
+    wicket_taker_id INTEGER,
+    player_out_id INTEGER,
     is_free_hit INTEGER DEFAULT 0,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(innings_id) REFERENCES innings(id)
   );
 `);
+
+// Add columns if missing (for existing DBs)
+try { db.exec('ALTER TABLE balls ADD COLUMN wicket_taker_id INTEGER'); } catch {}
+try { db.exec('ALTER TABLE balls ADD COLUMN player_out_id INTEGER'); } catch {}
+try { db.exec('ALTER TABLE balls ADD COLUMN wicket_type TEXT'); } catch {}
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -83,22 +89,17 @@ const YOUTUBE_SCOPES = [
 async function updateYouTubeTitle(tokens: any, broadcastId: string, scoreText: string) {
   try {
     const client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET,
       `${process.env.APP_URL}/auth/google/callback`
     );
     client.setCredentials(tokens);
     const youtube = google.youtube({ version: 'v3', auth: client });
     await youtube.liveBroadcasts.update({
       part: ['snippet'],
-      requestBody: {
-        id: broadcastId,
-        snippet: { title: scoreText, scheduledStartTime: new Date().toISOString() }
-      }
+      requestBody: { id: broadcastId, snippet: { title: scoreText, scheduledStartTime: new Date().toISOString() } }
     });
-  } catch (err: any) {
-    console.error('YouTube update error:', err.message);
-  }
+    console.log('YouTube title updated:', scoreText);
+  } catch (err: any) { console.error('YouTube update error:', err.message); }
 }
 
 async function postFacebookComment(liveVideoId: string, message: string) {
@@ -106,15 +107,12 @@ async function postFacebookComment(liveVideoId: string, message: string) {
   if (!token || !liveVideoId) return;
   try {
     const res = await fetch(`https://graph.facebook.com/v19.0/${liveVideoId}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, access_token: token })
     });
     const data = await res.json() as any;
     if (data.error) console.error('FB error:', data.error.message);
-  } catch (err: any) {
-    console.error('Facebook post error:', err.message);
-  }
+  } catch (err: any) { console.error('Facebook post error:', err.message); }
 }
 
 function buildScoreText(match: any) {
@@ -125,13 +123,18 @@ function buildScoreText(match: any) {
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-
   app.use(express.json());
   app.use(cookieParser());
 
+  // ── YouTube OAuth ─────────────────────────────────────────────────────────────
   app.get('/api/auth/google/url', (req, res) => {
     const url = oauth2Client.generateAuthUrl({ access_type: 'offline', scope: YOUTUBE_SCOPES, prompt: 'consent' });
     res.json({ url });
+  });
+
+  app.post('/api/auth/google/disconnect', (req, res) => {
+    res.clearCookie('google_tokens');
+    res.json({ success: true });
   });
 
   app.get('/auth/google/callback', async (req, res) => {
@@ -146,6 +149,7 @@ async function startServer() {
         else { window.location.href = '/'; }
       </script><p style="font-family:sans-serif;text-align:center;margin-top:40px;color:#16a34a">YouTube connected! Close this window.</p></body></html>`);
     } catch (err) {
+      console.error('OAuth error:', err);
       res.status(500).send('Authentication failed');
     }
   });
@@ -156,18 +160,20 @@ async function startServer() {
     try {
       oauth2Client.setCredentials(JSON.parse(tokensStr));
       const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
-      const response = await youtube.liveBroadcasts.list({ part: ['snippet', 'status'], broadcastStatus: 'active', maxResults: 10 });
+      const response = await youtube.liveBroadcasts.list({
+        part: ['snippet', 'status'], broadcastStatus: 'active', maxResults: 10
+      });
       res.json(response.data.items || []);
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch broadcasts' });
-    }
+    } catch (err) { res.status(500).json({ error: 'Failed to fetch broadcasts' }); }
   });
 
+  // ── Facebook ──────────────────────────────────────────────────────────────────
   app.post('/api/facebook/update', async (req, res) => {
     await postFacebookComment(req.body.live_id, req.body.text);
     res.json({ success: true });
   });
 
+  // ── Teams ─────────────────────────────────────────────────────────────────────
   app.get('/api/teams', (req, res) => res.json(db.prepare('SELECT * FROM teams ORDER BY id DESC').all()));
 
   app.post('/api/teams', (req, res) => {
@@ -181,17 +187,19 @@ async function startServer() {
     res.json(db.prepare('SELECT * FROM players WHERE team_id = ? ORDER BY name').all(req.params.id));
   });
 
+  // ── Players ───────────────────────────────────────────────────────────────────
   app.post('/api/players', (req, res) => {
     const { team_id, name } = req.body;
     const result = db.prepare('INSERT INTO players (team_id, name) VALUES (?, ?)').run(team_id, name);
     res.json({ id: result.lastInsertRowid, team_id, name });
   });
 
+  // ── Matches ───────────────────────────────────────────────────────────────────
   app.post('/api/matches', (req, res) => {
     const { team1_id, team2_id, overs_per_innings, youtube_url, facebook_live_id } = req.body;
     const result = db.prepare(
       'INSERT INTO matches (team1_id, team2_id, overs_per_innings, youtube_url, facebook_live_id) VALUES (?, ?, ?, ?, ?)'
-    ).run(team1_id, team2_id, overs_per_innings, youtube_url, facebook_live_id || null);
+    ).run(team1_id, team2_id, overs_per_innings, youtube_url || null, facebook_live_id || null);
     res.json({ id: result.lastInsertRowid });
   });
 
@@ -228,6 +236,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // ── Innings ───────────────────────────────────────────────────────────────────
   app.post('/api/innings', (req, res) => {
     const { match_id, batting_team_id, innings_number } = req.body;
     const result = db.prepare('INSERT INTO innings (match_id, batting_team_id, innings_number) VALUES (?, ?, ?)').run(match_id, batting_team_id, innings_number);
@@ -238,19 +247,30 @@ async function startServer() {
     res.json(db.prepare('SELECT * FROM balls WHERE innings_id = ? ORDER BY id DESC').all(req.params.id));
   });
 
+  // ── Balls ─────────────────────────────────────────────────────────────────────
   app.post('/api/balls', async (req, res) => {
     try {
-      const { innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id, runs_batter, extras_runs, extras_type, is_wicket, is_free_hit } = req.body;
+      const { innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id,
+        runs_batter, extras_runs, extras_type, is_wicket, is_free_hit,
+        wicket_type, wicket_taker_id, player_out_id } = req.body;
+
       const result = db.prepare(`
-        INSERT INTO balls (innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id, runs_batter, extras_runs, extras_type, is_wicket, is_free_hit)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id, runs_batter, extras_runs, extras_type, is_wicket, is_free_hit);
+        INSERT INTO balls (innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id,
+          runs_batter, extras_runs, extras_type, is_wicket, is_free_hit, wicket_type, wicket_taker_id, player_out_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(innings_id, over_number, ball_number, batsman_id, non_striker_id, bowler_id,
+        runs_batter, extras_runs, extras_type, is_wicket, is_free_hit,
+        wicket_type || null, wicket_taker_id || null, player_out_id || null);
 
       const total_runs = (runs_batter || 0) + (extras_runs || 0);
-      const is_valid = !['wide', 'no_ball'].includes(extras_type);
-      db.prepare('UPDATE innings SET total_runs = total_runs + ?, total_wickets = total_wickets + ?, total_balls = total_balls + ? WHERE id = ?')
-        .run(total_runs, is_wicket ? 1 : 0, is_valid ? 1 : 0, innings_id);
+      // penalty runs count in total but NOT as valid ball
+      const is_valid = !['wide', 'no_ball', 'penalty'].includes(extras_type);
+      const is_valid_for_balls = !['wide', 'no_ball'].includes(extras_type);
 
+      db.prepare(`UPDATE innings SET total_runs = total_runs + ?, total_wickets = total_wickets + ?, total_balls = total_balls + ? WHERE id = ?`)
+        .run(total_runs, is_wicket ? 1 : 0, is_valid_for_balls ? 1 : 0, innings_id);
+
+      // Async live updates
       const innings: any = db.prepare('SELECT match_id FROM innings WHERE id = ?').get(innings_id);
       if (innings) {
         const match: any = db.prepare(`
@@ -263,9 +283,11 @@ async function startServer() {
           if (match.youtube_broadcast_id && req.cookies.google_tokens) {
             updateYouTubeTitle(JSON.parse(req.cookies.google_tokens), match.youtube_broadcast_id, scoreText).catch(console.error);
           }
-          if (match.facebook_live_id && (is_wicket || (is_valid && ball_number === 6))) {
-            const fbMsg = is_wicket ? `WICKET! ${scoreText}` : `Over ${over_number + 1}: ${scoreText}`;
-            postFacebookComment(match.facebook_live_id, fbMsg).catch(console.error);
+          if (match.facebook_live_id) {
+            let fbMsg = '';
+            if (is_wicket) fbMsg = `WICKET! (${wicket_type?.replace('_', ' ') || 'out'}) ${scoreText}`;
+            else if (is_valid_for_balls && ball_number === 6) fbMsg = `Over ${over_number + 1} complete: ${scoreText}`;
+            if (fbMsg) postFacebookComment(match.facebook_live_id, fbMsg).catch(console.error);
           }
         }
       }
@@ -287,6 +309,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // ── Scorecard ─────────────────────────────────────────────────────────────────
   app.get('/api/matches/:id/scorecard', (req, res) => {
     const innings: any[] = db.prepare('SELECT * FROM innings WHERE match_id = ? ORDER BY innings_number').all(req.params.id);
     const scorecard = innings.map(inn => {
@@ -295,7 +318,8 @@ async function startServer() {
           COUNT(CASE WHEN b.extras_type IS NULL OR b.extras_type NOT IN ('wide','no_ball') THEN 1 END) as balls,
           COUNT(CASE WHEN b.runs_batter = 4 THEN 1 END) as fours,
           COUNT(CASE WHEN b.runs_batter = 6 THEN 1 END) as sixes,
-          MAX(CASE WHEN b.is_wicket = 1 THEN 1 ELSE 0 END) as is_out
+          MAX(CASE WHEN b.is_wicket = 1 THEN 1 ELSE 0 END) as is_out,
+          MAX(b.wicket_type) as wicket_type
         FROM balls b JOIN players p ON b.batsman_id = p.id WHERE b.innings_id = ? GROUP BY b.batsman_id
       `).all(inn.id);
       const bowlingStats = db.prepare(`
@@ -309,24 +333,23 @@ async function startServer() {
           SUM(CASE WHEN extras_type='wide' THEN extras_runs ELSE 0 END) as wides,
           SUM(CASE WHEN extras_type='no_ball' THEN extras_runs ELSE 0 END) as no_balls,
           SUM(CASE WHEN extras_type='bye' THEN extras_runs ELSE 0 END) as byes,
-          SUM(CASE WHEN extras_type='leg_bye' THEN extras_runs ELSE 0 END) as leg_byes
+          SUM(CASE WHEN extras_type='leg_bye' THEN extras_runs ELSE 0 END) as leg_byes,
+          SUM(CASE WHEN extras_type='penalty' THEN extras_runs ELSE 0 END) as penalty
         FROM balls WHERE innings_id = ?
       `).get(inn.id);
-      return { innings_number: inn.innings_number, batting_team_id: inn.batting_team_id, total_runs: inn.total_runs, total_wickets: inn.total_wickets, total_balls: inn.total_balls, battingStats, bowlingStats, extras: extras || { total: 0, wides: 0, no_balls: 0, byes: 0, leg_byes: 0 } };
+      return { innings_number: inn.innings_number, batting_team_id: inn.batting_team_id,
+        total_runs: inn.total_runs, total_wickets: inn.total_wickets, total_balls: inn.total_balls,
+        battingStats, bowlingStats, extras: extras || { total: 0, wides: 0, no_balls: 0, byes: 0, leg_byes: 0, penalty: 0 } };
     });
     res.json(scorecard);
   });
 
-  // Always serve built React app
+  // ── Serve built React app ─────────────────────────────────────────────────────
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
+  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Cricket Scorer Pro running on port ${PORT}`);
-  });
+  app.listen(PORT, '0.0.0.0', () => console.log(`Cricket Scorer Pro running on port ${PORT}`));
 }
 
 startServer().catch(console.error);
