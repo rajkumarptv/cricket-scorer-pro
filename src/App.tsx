@@ -399,6 +399,29 @@ const OverSummaryModal = ({ summary, onClose }: { summary: any; onClose: () => v
   </div>
 );
 
+// ─── Sliding Ticker ───────────────────────────────────────────────────────────
+function SlidingTicker({ items }: { items: string[] }) {
+  const [idx, setIdx] = useState(0);
+  const [fade, setFade] = useState(true);
+  useEffect(() => {
+    if (items.length <= 1) return;
+    const t = setInterval(() => {
+      setFade(false);
+      setTimeout(() => { setIdx(i => (i + 1) % items.length); setFade(true); }, 300);
+    }, 3500);
+    return () => clearInterval(t);
+  }, [items.length]);
+  if (!items.length) return null;
+  return (
+    <div className="text-center mt-2">
+      <span style={{ transition: 'opacity 0.3s', opacity: fade ? 1 : 0 }}
+        className="bg-white/10 px-3 py-1 rounded-full text-xs text-green-300 font-semibold inline-block">
+        {items[idx]}
+      </span>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 type View = 'dashboard' | 'setup' | 'scoring' | 'overlay';
 
@@ -695,6 +718,13 @@ export default function App() {
     setShowPlayerStats(true);
   };
 
+  const seedSampleData = async () => {
+    const r = await fetch('/api/seed', { method: 'POST' });
+    const d = await r.json();
+    fetchTeams();
+    showToast(d.message || 'Sample data added!');
+  };
+
   // ─── Computed ────────────────────────────────────────────────────────────────
   const currentOver = activeInnings ? Math.floor(activeInnings.total_balls / 6) : 0;
   const currentBall = activeInnings ? activeInnings.total_balls % 6 : 0;
@@ -704,6 +734,7 @@ export default function App() {
   const bowlingTeamPlayers = bowlingTeamId ? allPlayers[bowlingTeamId] || [] : [];
   const strikerPlayer = battingTeamPlayers.find(p => p.id === strikerId) || null;
   const nonStrikerPlayer = battingTeamPlayers.find(p => p.id === nonStrikerId) || null;
+  // Show ALL balls in current over including wide/NB
   const thisOverBalls = balls.filter(b => b.over_number === currentOver).reverse();
 
   // Current bowler stats
@@ -791,6 +822,11 @@ export default function App() {
             </div>
           )}
           <p className="text-xs text-green-400">{teams.length} team{teams.length !== 1 ? 's' : ''}</p>
+          {teams.length === 0 && (
+            <button onClick={seedSampleData} className="w-full py-2 border-2 border-dashed border-green-300 rounded-lg text-xs text-green-600 font-semibold hover:bg-green-50 transition-all">
+              ✨ Add Sample Teams (India XI & Australia XI with 11 players each)
+            </button>
+          )}
         </div>
       </Card>
     </div>
@@ -925,14 +961,33 @@ export default function App() {
               ) : null
             )}
           </div>
-          {/* Partnership */}
-          {partnership > 0 && strikerPlayer && nonStrikerPlayer && (
-            <div className="mt-2 text-center">
-              <span className="bg-white/10 px-3 py-1 rounded-full text-xs text-green-300 font-semibold">
-                Partnership: {partnership} runs
-              </span>
-            </div>
-          )}
+          {/* Sliding ticker — Partnership / RR / Bowler / Batsmen */}
+          {(() => {
+            const tickerItems: string[] = [];
+            if (partnership > 0 && strikerPlayer && nonStrikerPlayer)
+              tickerItems.push(`Partnership: ${partnership} runs`);
+            if (activeInnings && activeInnings.total_balls > 0) {
+              const rr = ((activeInnings.total_runs / activeInnings.total_balls) * 6).toFixed(1);
+              tickerItems.push(`Run Rate: ${rr}`);
+            }
+            if (target && activeInnings && activeInnings.total_balls > 0) {
+              const ballsLeft = (activeMatch?.overs_per_innings || 20) * 6 - activeInnings.total_balls;
+              const need = target - activeInnings.total_runs;
+              if (ballsLeft > 0 && need > 0) {
+                const rrr = ((need / ballsLeft) * 6).toFixed(1);
+                tickerItems.push(`Required RR: ${rrr} · Need ${need} in ${ballsLeft} balls`);
+              }
+            }
+            if (currentBowlerStats && bowlingTeamPlayers.find(p => p.id === bowlerId)) {
+              const bName = bowlingTeamPlayers.find(p => p.id === bowlerId)?.name || '';
+              tickerItems.push(`${bName}: ${Math.floor(currentBowlerStats.balls/6)}.${currentBowlerStats.balls%6}-${currentBowlerStats.runs}-${currentBowlerStats.wickets}W`);
+            }
+            if (strikerPlayer && strikerStats)
+              tickerItems.push(`${strikerPlayer.name}*: ${strikerStats.runs}(${strikerStats.balls}) SR:${strikerStats.balls ? ((strikerStats.runs/strikerStats.balls)*100).toFixed(0) : 0}`);
+            if (nonStrikerPlayer && nonStrikerStats)
+              tickerItems.push(`${nonStrikerPlayer.name}: ${nonStrikerStats.runs}(${nonStrikerStats.balls})`);
+            return tickerItems.length > 0 ? <SlidingTicker items={tickerItems} /> : null;
+          })()}
 
           {/* This over */}
           <div className="mt-3">
@@ -1060,53 +1115,102 @@ export default function App() {
     return <OverlayWidget />;
   };
 
-  // ─── Scorecard ───────────────────────────────────────────────────────────────
+  // ─── Scorecard (dark theme like reference) ────────────────────────────────────
   const renderScorecard = () => (
-    <Modal title="Match Scorecard" onClose={() => setShowScorecard(false)}>
-      {scorecard.map((inn: any, idx: number) => (
-        <div key={idx} className="mb-8">
-          <div className="flex justify-between items-center border-b-2 border-green-800 pb-2 mb-3">
-            <h3 className="font-bold text-green-900">Innings {inn.innings_number}</h3>
-            <p className="text-xl font-black text-green-700">{inn.total_runs}/{inn.total_wickets} <span className="text-sm font-normal text-green-400">({Math.floor(inn.total_balls / 6)}.{inn.total_balls % 6} ov)</span></p>
-          </div>
-          <table className="w-full text-xs mb-3">
-            <thead><tr className="text-green-500 border-b border-green-100">
-              <th className="text-left py-1 font-semibold">Batter</th><th className="text-right py-1">R</th><th className="text-right py-1">B</th><th className="text-right py-1">4s</th><th className="text-right py-1">6s</th><th className="text-right py-1">SR</th>
-            </tr></thead>
-            <tbody>
-              {inn.battingStats?.map((s: BattingStats, i: number) => (
-                <tr key={i} className="border-b border-green-50">
-                  <td className="py-1.5 font-medium">{s.name}{!s.is_out ? ' *' : ''}</td>
-                  <td className="text-right font-bold">{s.runs}</td><td className="text-right text-green-500">{s.balls}</td>
-                  <td className="text-right text-blue-600">{s.fours}</td><td className="text-right text-purple-600">{s.sixes}</td>
-                  <td className="text-right text-green-500">{((s.runs / (s.balls || 1)) * 100).toFixed(1)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="bg-green-50 rounded px-3 py-1.5 text-xs mb-3 flex justify-between">
-            <span className="text-green-600 font-semibold">Extras</span>
-            <span>{inn.extras?.total ?? 0} <span className="text-green-400">(wd {inn.extras?.wides ?? 0}, nb {inn.extras?.no_balls ?? 0}, b {inn.extras?.byes ?? 0}, lb {inn.extras?.leg_byes ?? 0}, pen {inn.extras?.penalty ?? 0})</span></span>
-          </div>
-          <table className="w-full text-xs">
-            <thead><tr className="text-green-500 border-b border-green-100">
-              <th className="text-left py-1 font-semibold">Bowler</th><th className="text-right py-1">O</th><th className="text-right py-1">R</th><th className="text-right py-1">W</th><th className="text-right py-1">Econ</th>
-            </tr></thead>
-            <tbody>
-              {inn.bowlingStats?.map((s: BowlingStats, i: number) => (
-                <tr key={i} className="border-b border-green-50">
-                  <td className="py-1.5 font-medium">{s.name}</td>
-                  <td className="text-right font-bold">{Math.floor(s.balls / 6)}.{s.balls % 6}</td>
-                  <td className="text-right text-green-500">{s.runs}</td>
-                  <td className="text-right font-black text-green-600">{s.wickets}</td>
-                  <td className="text-right text-green-500">{(s.runs / (s.balls / 6 || 1)).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-3">
+      <div className="bg-gray-900 text-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-3 bg-gray-800 border-b border-gray-700">
+          <h2 className="text-base font-bold text-white flex items-center gap-2">📋 Match Scorecard</h2>
+          <button onClick={() => setShowScorecard(false)} className="p-1 rounded-lg hover:bg-gray-700 text-gray-400"><X size={18} /></button>
         </div>
-      ))}
-    </Modal>
+        <div className="flex-1 overflow-y-auto">
+          {scorecard.map((inn: any, idx: number) => {
+            const isTeam1Batting = inn.batting_team_id === activeMatch?.team1_id;
+            const teamName = isTeam1Batting ? activeMatch?.team1_name : activeMatch?.team2_name;
+            const accentColor = idx === 0 ? '#ef4444' : '#3b82f6';
+            return (
+              <div key={idx} className="mb-0">
+                {/* Innings header */}
+                <div style={{ background: accentColor }} className="px-5 py-2 flex justify-between items-center">
+                  <span className="font-black text-sm uppercase tracking-wide">{teamName}</span>
+                  <span className="font-black text-xl">
+                    {inn.total_runs}/{inn.total_wickets}
+                    <span className="text-sm font-normal opacity-80 ml-2">({Math.floor(inn.total_balls/6)}.{inn.total_balls%6} ov)</span>
+                  </span>
+                </div>
+                {/* Batting */}
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-800 text-gray-400">
+                      <th className="text-left px-4 py-2 font-semibold">BATTER</th>
+                      <th className="text-right px-2 py-2 font-semibold">R</th>
+                      <th className="text-right px-2 py-2 font-semibold">B</th>
+                      <th className="text-right px-2 py-2 font-semibold">4s</th>
+                      <th className="text-right px-2 py-2 font-semibold">6s</th>
+                      <th className="text-right px-4 py-2 font-semibold">SR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inn.battingStats?.map((s: any, i: number) => (
+                      <tr key={i} className={`border-b border-gray-800 ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-850'} hover:bg-gray-700 cursor-pointer transition-all`}
+                        onClick={() => {
+                          const allP = [...(allPlayers[activeMatch?.team1_id||0]||[]), ...(allPlayers[activeMatch?.team2_id||0]||[])];
+                          const p = allP.find(p => p.name === s.name);
+                          if (p) fetchPlayerStats(p.id, p.name);
+                        }}>
+                        <td className="px-4 py-2.5 font-semibold text-white">
+                          {s.name}{!s.is_out ? <span className="text-yellow-400"> *</span> : ''}
+                          {s.wicket_type && <span className="text-gray-400 text-xs ml-1">({s.wicket_type.replace('_',' ')})</span>}
+                        </td>
+                        <td className="text-right px-2 py-2.5 font-black text-white">{s.runs}</td>
+                        <td className="text-right px-2 py-2.5 text-gray-400">{s.balls}</td>
+                        <td className="text-right px-2 py-2.5 text-blue-400 font-bold">{s.fours}</td>
+                        <td className="text-right px-2 py-2.5 text-purple-400 font-bold">{s.sixes}</td>
+                        <td className="text-right px-4 py-2.5 text-gray-300">{((s.runs/(s.balls||1))*100).toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {/* Extras */}
+                <div className="bg-gray-800 px-4 py-2 flex justify-between text-xs text-gray-400 border-t border-gray-700">
+                  <span className="font-semibold text-gray-300">Extras: {inn.extras?.total ?? 0}</span>
+                  <span>wd {inn.extras?.wides ?? 0} · nb {inn.extras?.no_balls ?? 0} · b {inn.extras?.byes ?? 0} · lb {inn.extras?.leg_byes ?? 0} · pen {inn.extras?.penalty ?? 0}</span>
+                </div>
+                {/* Bowling */}
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-800 text-gray-400">
+                      <th className="text-left px-4 py-2 font-semibold">BOWLER</th>
+                      <th className="text-right px-2 py-2 font-semibold">O</th>
+                      <th className="text-right px-2 py-2 font-semibold">R</th>
+                      <th className="text-right px-2 py-2 font-semibold">W</th>
+                      <th className="text-right px-4 py-2 font-semibold">ECON</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inn.bowlingStats?.map((s: any, i: number) => (
+                      <tr key={i} className={`border-b border-gray-800 ${i % 2 === 0 ? 'bg-gray-900' : ''} hover:bg-gray-700 cursor-pointer transition-all`}
+                        onClick={() => {
+                          const allP = [...(allPlayers[activeMatch?.team1_id||0]||[]), ...(allPlayers[activeMatch?.team2_id||0]||[])];
+                          const p = allP.find(p => p.name === s.name);
+                          if (p) fetchPlayerStats(p.id, p.name);
+                        }}>
+                        <td className="px-4 py-2.5 font-semibold text-white">{s.name}</td>
+                        <td className="text-right px-2 py-2.5 text-gray-300 font-mono">{Math.floor(s.balls/6)}.{s.balls%6}</td>
+                        <td className="text-right px-2 py-2.5 text-gray-400">{s.runs}</td>
+                        <td className="text-right px-2 py-2.5 font-black" style={{ color: s.wickets > 0 ? '#4ade80' : '#9ca3af' }}>{s.wickets}</td>
+                        <td className="text-right px-4 py-2.5 text-gray-300">{(s.runs/(s.balls/6||1)).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+          <p className="text-center text-xs text-gray-600 py-3">Tap any player to view career stats</p>
+        </div>
+      </div>
+    </div>
   );
 
   // ─── Root ─────────────────────────────────────────────────────────────────────
