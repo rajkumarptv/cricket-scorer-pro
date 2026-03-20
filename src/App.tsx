@@ -17,10 +17,11 @@ const WICKET_TYPES = [
   { id: 'timed_out', label: 'Timed Out', needsTaker: false },
 ];
 
-// ─── Overlay Widget (self-contained, fetches own data) ────────────────────────
+// ─── Overlay Widget (10 styles, self-fetching) ────────────────────────────────
 function OverlayWidget() {
   const [data, setData] = useState<any>(null);
-
+  const params = new URLSearchParams(window.location.search);
+  const style = parseInt(params.get('style') || '1');
   const matchId = window.location.pathname.split('/')[2];
 
   const getBallChip = (b: any) => {
@@ -124,112 +125,351 @@ function OverlayWidget() {
   }, []);
 
   if (!data) return (
-    <div className="min-h-screen bg-transparent flex items-end p-0">
-      <div className="bg-green-900/90 text-green-400 px-6 py-3 text-sm font-bold rounded-t-xl">Loading overlay...</div>
+    <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', background: 'transparent' }}>
+      <div style={{ background: 'rgba(0,0,0,0.7)', color: '#4ade80', padding: '8px 16px', fontSize: 12 }}>Loading overlay...</div>
     </div>
   );
 
   const { match, currInnings, thisOverBalls, striker, nonStriker, bowler, partnership, runRate, rrr, target, currentOver, currentBall } = data;
-  const battingTeamName = currInnings?.batting_team_id === match.team1_id ? match.team1_name : match.team2_name;
-  const bowlingTeamName = currInnings?.batting_team_id === match.team1_id ? match.team2_name : match.team1_name;
+  const battingTeam = currInnings?.batting_team_id === match.team1_id ? match.team1_name : match.team2_name;
+  const bowlingTeam = currInnings?.batting_team_id === match.team1_id ? match.team2_name : match.team1_name;
+  const score = `${currInnings?.total_runs ?? 0}/${currInnings?.total_wickets ?? 0}`;
+  const overs = `${currentOver}.${currentBall}`;
 
-  return (
-    <div className="min-h-screen bg-transparent flex items-end">
-      <div style={{ fontFamily: 'system-ui, sans-serif', width: '100%', background: 'transparent' }}>
-        {/* Main overlay bar */}
-        <div style={{ display: 'flex', alignItems: 'stretch', background: 'rgba(5,40,10,0.96)', borderTop: '3px solid #22c55e', minHeight: 70 }}>
+  const ballChip = (b: any, size = 26) => {
+    let label = b.extras_type === 'wide' ? (b.extras_runs > 1 ? `W+${b.extras_runs-1}` : 'Wd')
+      : b.extras_type === 'no_ball' ? (b.runs_batter > 0 ? `N+${b.runs_batter}` : 'Nb')
+      : b.extras_type === 'bye' ? `B${b.extras_runs}`
+      : b.extras_type === 'leg_bye' ? `L${b.extras_runs}`
+      : b.is_wicket ? 'W' : String(b.runs_batter);
+    let bg = b.is_wicket ? '#ef4444' : b.extras_type === 'wide' ? '#eab308' : b.extras_type === 'no_ball' ? '#f97316' : b.extras_type === 'bye' ? '#0d9488' : b.extras_type === 'leg_bye' ? '#0891b2' : b.runs_batter === 6 ? '#7c3aed' : b.runs_batter === 4 ? '#2563eb' : 'rgba(255,255,255,0.2)';
+    let color = b.extras_type === 'wide' ? '#422006' : '#fff';
+    return <div key={Math.random()} style={{ minWidth: size, height: size, borderRadius: '50%', background: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size > 30 ? 11 : 9, fontWeight: 800, flexShrink: 0 }}>{label}</div>;
+  };
 
-          {/* LEFT: Batsmen */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 14px', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 160 }}>
-            {striker.player && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <span style={{ color: '#facc15', fontSize: 9, fontWeight: 900 }}>▶</span>
-                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>{striker.player.name}</span>
-                <span style={{ color: '#facc15', fontSize: 11, fontWeight: 900 }}>*</span>
-                <span style={{ color: '#86efac', fontSize: 12, fontWeight: 700, marginLeft: 4 }}>
-                  {striker.stats.runs}
-                  <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 400 }}> ({striker.stats.balls})</span>
-                  {striker.stats.fours > 0 && <span style={{ color: '#93c5fd', fontSize: 10 }}> {striker.stats.fours}×4</span>}
-                  {striker.stats.sixes > 0 && <span style={{ color: '#c4b5fd', fontSize: 10 }}> {striker.stats.sixes}×6</span>}
-                </span>
-              </div>
-            )}
-            {nonStriker.player && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: '#4ade80', fontSize: 9 }}>●</span>
-                <span style={{ color: '#d1fae5', fontSize: 12, fontWeight: 600 }}>{nonStriker.player.name}</span>
-                <span style={{ color: '#6ee7b7', fontSize: 12, fontWeight: 700, marginLeft: 4 }}>
-                  {nonStriker.stats.runs}
-                  <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 400 }}> ({nonStriker.stats.balls})</span>
-                </span>
-              </div>
-            )}
+  const S = { fontFamily: "'Segoe UI', system-ui, sans-serif" };
+
+  // ── Style 1: Classic Dark Green (current) ──
+  if (style === 1) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', background: 'rgba(5,40,10,0.97)', borderTop: '3px solid #22c55e', minHeight: 68 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 14px', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 170 }}>
+          {striker.player && <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+            <span style={{ color: '#facc15', fontSize: 8, fontWeight: 900 }}>▶</span>
+            <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{striker.player.name}<span style={{ color: '#facc15' }}> *</span></span>
+            <span style={{ color: '#86efac', fontSize: 11, fontWeight: 700 }}>{striker.stats.runs}<span style={{ color: '#4ade80', fontWeight: 400, fontSize: 10 }}> ({striker.stats.balls})</span></span>
+          </div>}
+          {nonStriker.player && <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ color: '#4ade80', fontSize: 8 }}>●</span>
+            <span style={{ color: '#d1fae5', fontSize: 11, fontWeight: 600 }}>{nonStriker.player.name}</span>
+            <span style={{ color: '#6ee7b7', fontSize: 11, fontWeight: 700 }}>{nonStriker.stats.runs}<span style={{ color: '#4ade80', fontWeight: 400, fontSize: 10 }}> ({nonStriker.stats.balls})</span></span>
+          </div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 16px', background: 'rgba(22,101,52,0.5)' }}>
+          <div style={{ color: '#86efac', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase' }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+            <span style={{ color: '#fff', fontSize: 30, fontWeight: 900, lineHeight: 1 }}>{score.split('/')[0]}</span>
+            <span style={{ color: '#4ade80', fontSize: 20, fontWeight: 700 }}>/{score.split('/')[1]}</span>
+            <span style={{ color: '#86efac', fontSize: 12, fontFamily: 'monospace' }}>({overs})</span>
           </div>
-
-          {/* CENTER: Score */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 16px', background: 'rgba(22,101,52,0.6)' }}>
-            <div style={{ color: '#bbf7d0', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
-              {battingTeamName} vs {bowlingTeamName}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ color: '#fff', fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{currInnings?.total_runs ?? 0}</span>
-              <span style={{ color: '#4ade80', fontSize: 22, fontWeight: 700 }}>/{currInnings?.total_wickets ?? 0}</span>
-              <span style={{ color: '#86efac', fontSize: 13, fontWeight: 600, fontFamily: 'monospace' }}>({currentOver}.{currentBall})</span>
-            </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
-              <span style={{ color: '#fde68a', fontSize: 10 }}>RR {runRate}</span>
-              {rrr && <span style={{ color: '#f87171', fontSize: 10 }}>RRR {rrr}</span>}
-              {target && <span style={{ color: '#fde68a', fontSize: 10 }}>Need {target - (currInnings?.total_runs || 0)}</span>}
-            </div>
-          </div>
-
-          {/* This over balls */}
-          {thisOverBalls.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
-              <div style={{ color: '#6ee7b7', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>THIS OVER</div>
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                {thisOverBalls.slice(-6).map((b: any, i: number) => {
-                  let label = String(b.runs_batter);
-                  let bg = 'rgba(255,255,255,0.15)'; let color = '#fff';
-                  if (b.is_wicket) { label = 'W'; bg = '#ef4444'; }
-                  else if (b.extras_type === 'wide') { label = b.extras_runs > 1 ? `W+${b.extras_runs-1}` : 'Wd'; bg = '#eab308'; color = '#422006'; }
-                  else if (b.extras_type === 'no_ball') { label = b.runs_batter > 0 ? `N+${b.runs_batter}` : 'Nb'; bg = '#f97316'; }
-                  else if (b.extras_type === 'bye') { label = b.extras_runs > 0 ? `B${b.extras_runs}` : 'B'; bg = '#0d9488'; }
-                  else if (b.extras_type === 'leg_bye') { label = b.extras_runs > 0 ? `L${b.extras_runs}` : 'Lb'; bg = '#0891b2'; }
-                  else if (b.runs_batter === 6) { bg = '#7c3aed'; }
-                  else if (b.runs_batter === 4) { bg = '#2563eb'; }
-                  return (
-                    <div key={i} style={{ minWidth: 28, height: 28, borderRadius: '50%', background: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800 }}>
-                      {label}
-                    </div>
-                  );
-                })}
-              </div>
-              {partnership > 0 && <div style={{ color: '#86efac', fontSize: 9, marginTop: 3, textAlign: 'center' }}>P: {partnership}</div>}
-            </div>
-          )}
-
-          {/* RIGHT: Bowler */}
-          {bowler.player && (
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 14px', borderLeft: '1px solid rgba(255,255,255,0.1)', minWidth: 130 }}>
-              <div style={{ color: '#6ee7b7', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
-              <div style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>{bowler.player.name}</div>
-              <div style={{ color: '#86efac', fontSize: 11, fontWeight: 600 }}>
-                {Math.floor(bowler.stats.balls / 6)}.{bowler.stats.balls % 6} ov &nbsp;
-                <span style={{ color: '#fca5a5' }}>{bowler.stats.runs}r</span> &nbsp;
-                <span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span>
-              </div>
-            </div>
-          )}
-
-          {/* LIVE badge */}
-          <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', background: '#16a34a', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
-            </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
+            <span style={{ color: '#fde68a', fontSize: 9 }}>RR {runRate}</span>
+            {rrr && <span style={{ color: '#f87171', fontSize: 9 }}>RRR {rrr}</span>}
+            {target && <span style={{ color: '#fde68a', fontSize: 9 }}>Need {target - (currInnings?.total_runs||0)}</span>}
           </div>
         </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 10px', borderLeft: '1px solid rgba(255,255,255,0.1)', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ color: '#6ee7b7', fontSize: 8, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 200 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+          {partnership > 0 && <div style={{ color: '#86efac', fontSize: 8, marginTop: 3 }}>P: {partnership}</div>}
+        </div>}
+        {bowler.player && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(255,255,255,0.1)', minWidth: 120 }}>
+          <div style={{ color: '#6ee7b7', fontSize: 8, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#86efac', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6} ov <span style={{ color: '#fca5a5' }}>{bowler.stats.runs}r</span> <span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '0 10px', background: '#16a34a' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
+            <span style={{ color: '#fff', fontSize: 8, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 2: Blue Premium ──
+  if (style === 2) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(15,23,60,0.97)', borderTop: '3px solid #3b82f6', display: 'flex', alignItems: 'stretch', minHeight: 70 }}>
+        <div style={{ background: '#1e40af', padding: '10px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 160 }}>
+          <div style={{ color: '#bfdbfe', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>BATTING</div>
+          {striker.player && <div style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{striker.player.name} <span style={{ color: '#fbbf24' }}>*</span> <span style={{ color: '#93c5fd', fontSize: 11 }}>{striker.stats.runs}({striker.stats.balls})</span></div>}
+          {nonStriker.player && <div style={{ color: '#bfdbfe', fontSize: 11, marginTop: 2 }}>{nonStriker.player.name} <span style={{ color: '#93c5fd', fontSize: 10 }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#93c5fd', fontSize: 9, textTransform: 'uppercase', letterSpacing: 2 }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ color: '#fff', fontSize: 32, fontWeight: 900, lineHeight: 1.1 }}>{score} <span style={{ color: '#93c5fd', fontSize: 14, fontWeight: 500 }}>({overs} ov)</span></div>
+          <div style={{ color: '#fbbf24', fontSize: 9, marginTop: 2 }}>RR {runRate}{rrr ? ` · RRR ${rrr}` : ''}{target ? ` · Need ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(59,130,246,0.3)' }}>
+          <div style={{ color: '#60a5fa', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+        </div>}
+        {bowler.player && <div style={{ background: '#1e3a5f', padding: '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '1px solid rgba(59,130,246,0.3)' }}>
+          <div style={{ color: '#60a5fa', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLING</div>
+          <div style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#93c5fd', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6}-{bowler.stats.runs}-<span style={{ color: '#4ade80', fontWeight: 800 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#2563eb', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2, writingMode: 'vertical-rl' }}>LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 3: Red Hot (IPL style) ──
+  if (style === 3) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(30,0,0,0.97)', borderTop: '3px solid #ef4444', display: 'flex', alignItems: 'stretch', minHeight: 70 }}>
+        <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 170, borderRight: '1px solid rgba(239,68,68,0.3)' }}>
+          {striker.player && <div style={{ color: '#fff', fontSize: 13, fontWeight: 800 }}>{striker.player.name}<span style={{ color: '#fbbf24', fontSize: 10 }}> ★</span> <span style={{ color: '#fca5a5', fontSize: 12 }}>{striker.stats.runs}({striker.stats.balls})</span></div>}
+          {nonStriker.player && <div style={{ color: '#fca5a5', fontSize: 11, marginTop: 3 }}>{nonStriker.player.name} <span style={{ color: '#f87171', fontSize: 10 }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(239,68,68,0.1)' }}>
+          <div style={{ color: '#fca5a5', fontSize: 9, textTransform: 'uppercase', letterSpacing: 3, marginBottom: 2 }}>{battingTeam} <span style={{ color: '#ef4444' }}>vs</span> {bowlingTeam}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ color: '#fff', fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{score.split('/')[0]}</span>
+            <span style={{ color: '#ef4444', fontSize: 24, fontWeight: 700 }}>/{score.split('/')[1]}</span>
+            <span style={{ color: '#fca5a5', fontSize: 13, fontFamily: 'monospace' }}> ({overs})</span>
+          </div>
+          <div style={{ color: '#fbbf24', fontSize: 9, marginTop: 2 }}>CRR {runRate}{rrr ? ` | RRR ${rrr}` : ''}{target ? ` | NEED ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(239,68,68,0.3)', borderRight: '1px solid rgba(239,68,68,0.3)' }}>
+          <div style={{ color: '#f87171', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>OVER {currentOver+1}</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b, 28)}</React.Fragment>)}</div>
+          {partnership > 0 && <div style={{ color: '#fca5a5', fontSize: 8, marginTop: 3 }}>P: {partnership}</div>}
+        </div>}
+        {bowler.player && <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 120, borderLeft: '1px solid rgba(239,68,68,0.3)' }}>
+          <div style={{ color: '#f87171', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#fca5a5', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6} · {bowler.stats.runs}R · <span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#dc2626', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>🔴 LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 4: Gold/Black Luxury ──
+  if (style === 4) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(10,8,0,0.98)', borderTop: '3px solid #f59e0b', display: 'flex', alignItems: 'stretch', minHeight: 68 }}>
+        <div style={{ borderRight: '2px solid rgba(245,158,11,0.4)', padding: '8px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 170 }}>
+          {striker.player && <div style={{ color: '#fef3c7', fontSize: 12, fontWeight: 800 }}>{striker.player.name} <span style={{ color: '#f59e0b' }}>◆</span> <span style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700 }}>{striker.stats.runs}<span style={{ fontSize: 10, color: '#d97706' }}>({striker.stats.balls})</span></span></div>}
+          {nonStriker.player && <div style={{ color: '#d97706', fontSize: 11, marginTop: 3 }}>{nonStriker.player.name} <span style={{ color: '#b45309', fontSize: 10 }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#92400e', fontSize: 9, textTransform: 'uppercase', letterSpacing: 4 }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ color: '#fef3c7', fontSize: 32, fontWeight: 900, lineHeight: 1.1 }}>{score.split('/')[0]} <span style={{ color: '#f59e0b', fontSize: 22 }}>/ {score.split('/')[1]}</span> <span style={{ color: '#d97706', fontSize: 13 }}>({overs})</span></div>
+          <div style={{ color: '#f59e0b', fontSize: 9 }}>RR {runRate}{rrr ? ` ◆ RRR ${rrr}` : ''}{target ? ` ◆ NEED ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '2px solid rgba(245,158,11,0.4)', borderRight: '2px solid rgba(245,158,11,0.4)' }}>
+          <div style={{ color: '#f59e0b', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 2 }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+        </div>}
+        {bowler.player && <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '2px solid rgba(245,158,11,0.4)' }}>
+          <div style={{ color: '#f59e0b', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#fef3c7', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#d97706', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6} — {bowler.stats.runs}R — <span style={{ color: '#4ade80', fontWeight: 800 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#92400e', display: 'flex', alignItems: 'center', padding: '0 12px' }}>
+          <span style={{ color: '#fef3c7', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 5: Purple Neon ──
+  if (style === 5) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(20,0,40,0.97)', borderTop: '3px solid #a855f7', display: 'flex', alignItems: 'stretch', minHeight: 70 }}>
+        <div style={{ padding: '8px 14px', borderRight: '1px solid rgba(168,85,247,0.4)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 180 }}>
+          {striker.player && <div style={{ color: '#f3e8ff', fontSize: 13, fontWeight: 800 }}>{striker.player.name} <span style={{ color: '#e879f9' }}>★</span> <span style={{ color: '#c4b5fd', fontSize: 12 }}>{striker.stats.runs}({striker.stats.balls})</span></div>}
+          {nonStriker.player && <div style={{ color: '#c4b5fd', fontSize: 11, marginTop: 3 }}>{nonStriker.player.name} <span style={{ color: '#a78bfa' }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+          {partnership > 0 && <div style={{ color: '#7c3aed', fontSize: 8, marginTop: 3 }}>PARTNERSHIP: {partnership}</div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(139,92,246,0.1)' }}>
+          <div style={{ color: '#c4b5fd', fontSize: 9, textTransform: 'uppercase', letterSpacing: 3 }}>{battingTeam} <span style={{ color: '#a855f7' }}>◈</span> {bowlingTeam}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+            <span style={{ color: '#fff', fontSize: 34, fontWeight: 900, lineHeight: 1 }}>{score.split('/')[0]}</span>
+            <span style={{ color: '#a855f7', fontSize: 22, fontWeight: 700 }}>/{score.split('/')[1]}</span>
+            <span style={{ color: '#c4b5fd', fontSize: 12 }}> ({overs})</span>
+          </div>
+          <div style={{ color: '#e879f9', fontSize: 9, marginTop: 2 }}>RR {runRate}{rrr ? ` | RRR ${rrr}` : ''}{target ? ` | NEED ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(168,85,247,0.4)', borderRight: '1px solid rgba(168,85,247,0.4)' }}>
+          <div style={{ color: '#c084fc', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+        </div>}
+        {bowler.player && <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '1px solid rgba(168,85,247,0.4)' }}>
+          <div style={{ color: '#c084fc', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLING</div>
+          <div style={{ color: '#f3e8ff', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#c4b5fd', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6} · {bowler.stats.runs}R · <span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#7c3aed', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 6: White Clean (Sports TV) ──
+  if (style === 6) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(255,255,255,0.97)', borderTop: '4px solid #16a34a', display: 'flex', alignItems: 'stretch', minHeight: 68, boxShadow: '0 -2px 20px rgba(0,0,0,0.3)' }}>
+        <div style={{ background: '#16a34a', padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 170 }}>
+          {striker.player && <div style={{ color: '#fff', fontSize: 12, fontWeight: 800 }}>{striker.player.name} <span style={{ color: '#fbbf24' }}>*</span> <span style={{ color: '#bbf7d0', fontSize: 11 }}>{striker.stats.runs}({striker.stats.balls})</span></div>}
+          {nonStriker.player && <div style={{ color: '#dcfce7', fontSize: 11, marginTop: 2 }}>{nonStriker.player.name} <span style={{ color: '#bbf7d0', fontSize: 10 }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#6b7280', fontSize: 9, textTransform: 'uppercase', letterSpacing: 2 }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ color: '#111827', fontSize: 30, fontWeight: 900, lineHeight: 1.1 }}>{score} <span style={{ color: '#6b7280', fontSize: 13 }}>({overs} ov)</span></div>
+          <div style={{ color: '#16a34a', fontSize: 9, fontWeight: 700 }}>RR {runRate}{rrr ? ` · RRR ${rrr}` : ''}{target ? ` · Need ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb' }}>
+          <div style={{ color: '#6b7280', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+        </div>}
+        {bowler.player && <div style={{ background: '#f3f4f6', padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '1px solid #e5e7eb' }}>
+          <div style={{ color: '#6b7280', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#111827', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#4b5563', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6} · {bowler.stats.runs}R · <span style={{ color: '#16a34a', fontWeight: 800 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#16a34a', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>● LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 7: Minimal Top Bar ──
+  if (style === 7) return (
+    <div style={{ ...S, position: 'fixed', top: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(0,0,0,0.9)', borderBottom: '2px solid #22c55e', display: 'flex', alignItems: 'center', padding: '6px 16px', gap: 20, height: 44 }}>
+        <span style={{ color: '#22c55e', fontSize: 10, fontWeight: 900, letterSpacing: 1 }}>● LIVE</span>
+        <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>{battingTeam} <span style={{ color: '#6b7280' }}>vs</span> {bowlingTeam}</span>
+        <span style={{ color: '#fff', fontSize: 18, fontWeight: 900 }}>{score}</span>
+        <span style={{ color: '#86efac', fontSize: 11, fontFamily: 'monospace' }}>({overs} ov)</span>
+        <span style={{ color: '#fde68a', fontSize: 10 }}>RR {runRate}</span>
+        {target && <span style={{ color: '#f87171', fontSize: 10 }}>Need {target-(currInnings?.total_runs||0)}</span>}
+        <div style={{ height: 20, width: 1, background: 'rgba(255,255,255,0.2)' }} />
+        {striker.player && <span style={{ color: '#fff', fontSize: 10 }}>{striker.player.name}<span style={{ color: '#fbbf24' }}>*</span> <span style={{ color: '#86efac' }}>{striker.stats.runs}({striker.stats.balls})</span></span>}
+        {nonStriker.player && <span style={{ color: '#9ca3af', fontSize: 10 }}>{nonStriker.player.name} <span style={{ color: '#6b7280' }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></span>}
+        <div style={{ height: 20, width: 1, background: 'rgba(255,255,255,0.2)' }} />
+        {bowler.player && <span style={{ color: '#c4b5fd', fontSize: 10 }}>{bowler.player.name} <span style={{ color: '#a78bfa' }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6}-{bowler.stats.runs}-{bowler.stats.wickets}W</span></span>}
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 3 }}>{thisOverBalls.slice(-8).map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b, 22)}</React.Fragment>)}</div>
+      </div>
+    </div>
+  );
+
+  // ── Style 8: Orange Cricket ──
+  if (style === 8) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(20,10,0,0.97)', borderTop: '3px solid #f97316', display: 'flex', alignItems: 'stretch', minHeight: 68 }}>
+        <div style={{ background: 'rgba(249,115,22,0.2)', padding: '8px 14px', borderRight: '1px solid rgba(249,115,22,0.4)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 170 }}>
+          {striker.player && <div style={{ color: '#fff', fontSize: 13, fontWeight: 800 }}>{striker.player.name} <span style={{ color: '#fbbf24' }}>*</span></div>}
+          {striker.player && <div style={{ color: '#fed7aa', fontSize: 11 }}>{striker.stats.runs} runs ({striker.stats.balls} balls){striker.stats.fours > 0 ? ` · ${striker.stats.fours}×4` : ''}{striker.stats.sixes > 0 ? ` · ${striker.stats.sixes}×6` : ''}</div>}
+          {nonStriker.player && <div style={{ color: '#9a3412', fontSize: 10, marginTop: 3 }}>{nonStriker.player.name}: {nonStriker.stats.runs}({nonStriker.stats.balls})</div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#fdba74', fontSize: 9, textTransform: 'uppercase', letterSpacing: 3 }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ color: '#fff', fontSize: 30, fontWeight: 900, lineHeight: 1.1 }}>{score.split('/')[0]} <span style={{ color: '#f97316', fontSize: 20 }}>/ {score.split('/')[1]}</span> <span style={{ color: '#fdba74', fontSize: 12 }}>({overs})</span></div>
+          <div style={{ color: '#fbbf24', fontSize: 9 }}>CRR: {runRate}{rrr ? ` | RRR: ${rrr}` : ''}{target ? ` | NEED: ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(249,115,22,0.4)', borderRight: '1px solid rgba(249,115,22,0.4)' }}>
+          <div style={{ color: '#fb923c', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>OVER {currentOver+1}</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+          {partnership > 0 && <div style={{ color: '#fdba74', fontSize: 8, marginTop: 3 }}>P/SHIP: {partnership}</div>}
+        </div>}
+        {bowler.player && <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '1px solid rgba(249,115,22,0.4)' }}>
+          <div style={{ color: '#fb923c', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#fed7aa', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6}-{bowler.stats.runs}-<span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#ea580c', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#fff', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 9: Teal/Cyan Modern ──
+  if (style === 9) return (
+    <div style={{ ...S, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
+      <div style={{ background: 'rgba(0,20,25,0.97)', borderTop: '3px solid #14b8a6', display: 'flex', alignItems: 'stretch', minHeight: 68 }}>
+        <div style={{ background: 'rgba(20,184,166,0.15)', padding: '8px 14px', borderRight: '1px solid rgba(20,184,166,0.3)', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 170 }}>
+          {striker.player && <div style={{ color: '#f0fdfa', fontSize: 12, fontWeight: 800 }}>{striker.player.name} <span style={{ color: '#fbbf24' }}>*</span> <span style={{ color: '#5eead4', fontSize: 11 }}>{striker.stats.runs}({striker.stats.balls})</span></div>}
+          {nonStriker.player && <div style={{ color: '#99f6e4', fontSize: 11, marginTop: 3 }}>{nonStriker.player.name} <span style={{ color: '#5eead4', fontSize: 10 }}>{nonStriker.stats.runs}({nonStriker.stats.balls})</span></div>}
+          {partnership > 0 && <div style={{ color: '#0d9488', fontSize: 8, marginTop: 3 }}>P/SHIP: {partnership} runs</div>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#5eead4', fontSize: 9, textTransform: 'uppercase', letterSpacing: 3 }}>{battingTeam} vs {bowlingTeam}</div>
+          <div style={{ color: '#fff', fontSize: 30, fontWeight: 900, lineHeight: 1.1 }}>{score.split('/')[0]} <span style={{ color: '#14b8a6', fontSize: 20 }}>/{score.split('/')[1]}</span> <span style={{ color: '#5eead4', fontSize: 12 }}>({overs})</span></div>
+          <div style={{ color: '#fbbf24', fontSize: 9 }}>RR {runRate}{rrr ? ` · RRR ${rrr}` : ''}{target ? ` · NEED ${target-(currInnings?.total_runs||0)}` : ''}</div>
+        </div>
+        {thisOverBalls.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(20,184,166,0.3)', borderRight: '1px solid rgba(20,184,166,0.3)' }}>
+          <div style={{ color: '#2dd4bf', fontSize: 8, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>THIS OVER</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>{thisOverBalls.map((b: any, i: number) => <React.Fragment key={i}>{ballChip(b)}</React.Fragment>)}</div>
+        </div>}
+        {bowler.player && <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 130, borderLeft: '1px solid rgba(20,184,166,0.3)' }}>
+          <div style={{ color: '#2dd4bf', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>BOWLER</div>
+          <div style={{ color: '#f0fdfa', fontSize: 12, fontWeight: 700 }}>{bowler.player.name}</div>
+          <div style={{ color: '#5eead4', fontSize: 10 }}>{Math.floor(bowler.stats.balls/6)}.{bowler.stats.balls%6}-{bowler.stats.runs}-<span style={{ color: '#4ade80', fontWeight: 900 }}>{bowler.stats.wickets}W</span></div>
+        </div>}
+        <div style={{ background: '#0f766e', display: 'flex', alignItems: 'center', padding: '0 10px' }}>
+          <span style={{ color: '#f0fdfa', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}>LIVE</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Style 10: Overlay Selector (preview all) ──
+  return (
+    <div style={{ ...S, minHeight: '100vh', background: '#0f172a', padding: 20, color: '#fff' }}>
+      <h1 style={{ fontSize: 20, fontWeight: 900, color: '#4ade80', marginBottom: 6 }}>🎨 Cricket Overlay Styles</h1>
+      <p style={{ color: '#94a3b8', fontSize: 12, marginBottom: 20 }}>Copy the URL and change <code style={{ color: '#fbbf24' }}>?style=N</code> in OBS Browser Source</p>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {[
+          { n: 1, name: 'Classic Dark Green', color: '#22c55e' },
+          { n: 2, name: 'Blue Premium', color: '#3b82f6' },
+          { n: 3, name: 'Red Hot (IPL)', color: '#ef4444' },
+          { n: 4, name: 'Gold/Black Luxury', color: '#f59e0b' },
+          { n: 5, name: 'Purple Neon', color: '#a855f7' },
+          { n: 6, name: 'White Clean (Sports TV)', color: '#16a34a' },
+          { n: 7, name: 'Minimal Top Bar', color: '#22c55e' },
+          { n: 8, name: 'Orange Cricket', color: '#f97316' },
+          { n: 9, name: 'Teal/Cyan Modern', color: '#14b8a6' },
+        ].map(s => (
+          <a key={s.n} href={`?style=${s.n}`} target="_blank"
+            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#1e293b', borderRadius: 10, border: `2px solid ${s.color}30`, textDecoration: 'none', color: '#fff', transition: 'all 0.2s' }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Style {s.n}: {s.name}</div>
+              <div style={{ color: '#94a3b8', fontSize: 11 }}>
+                {window.location.origin}/overlay/{matchId}?style={s.n}
+              </div>
+            </div>
+            <div style={{ marginLeft: 'auto', color: s.color, fontSize: 11, fontWeight: 700 }}>OPEN →</div>
+          </a>
+        ))}
+      </div>
+      <div style={{ marginTop: 20, padding: 16, background: '#1e293b', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <p style={{ color: '#94a3b8', fontSize: 11, margin: 0 }}>
+          <strong style={{ color: '#4ade80' }}>OBS Setup:</strong> Add Browser Source → URL: <code style={{ color: '#fbbf24' }}>{window.location.origin}/overlay/{matchId}?style=1</code> → Width: 1920, Height: 1080 → Custom CSS: <code style={{ color: '#fbbf24' }}>body {'{ background: rgba(0,0,0,0) !important; }'}</code>
+        </p>
       </div>
     </div>
   );
