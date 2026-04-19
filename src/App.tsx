@@ -854,6 +854,8 @@ export default function App() {
   const [overs, setOvers] = useState(20);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [facebookLiveId, setFacebookLiveId] = useState('');
+  const [fbStreams, setFbStreams] = useState<{ page_name: string; access_token: string; live_video_id: string }[]>([]);
+  const [activeFbStreams, setActiveFbStreams] = useState<{ id: number; page_name: string; live_video_id: string }[]>([]);
   const [strikerId, setStrikerId] = useState<number | null>(null);
   const [nonStrikerId, setNonStrikerId] = useState<number | null>(null);
   const [bowlerId, setBowlerId] = useState<number | null>(null);
@@ -918,6 +920,8 @@ export default function App() {
       setActiveInnings(curr);
       fetchBalls(curr.id);
     }
+    const fsRes = await fetch(`/api/matches/${id}/facebook-streams`);
+    if (fsRes.ok) setActiveFbStreams(await fsRes.json());
     if (!silent) setView('scoring');
   };
   const fetchBalls = async (inningsId: number) => {
@@ -949,6 +953,10 @@ export default function App() {
     const r = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team1_id: selectedTeam1, team2_id: selectedTeam2, overs_per_innings: overs, youtube_url: youtubeUrl, facebook_live_id: facebookLiveId }) });
     const d = await r.json();
     if (selectedBroadcastId) await fetch(`/api/matches/${d.id}/youtube`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ broadcast_id: selectedBroadcastId }) });
+    await Promise.all(fbStreams.filter(s => s.page_name && s.access_token && s.live_video_id).map(s =>
+      fetch(`/api/matches/${d.id}/facebook-streams`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) })
+    ));
+    setFbStreams([]);
     loadMatch(d.id); showToast('Match started!');
   };
   const handleToss = async (winnerId: number, decision: 'bat' | 'bowl') => {
@@ -1191,7 +1199,7 @@ export default function App() {
       <div className="bg-gradient-to-br from-green-700 to-green-900 text-white rounded-2xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><Tv2 size={22} /></div>
-          <div><h1 className="text-2xl font-bold">Cricket Scorer Pro</h1><p className="text-green-200 text-sm">Live · YouTube · Facebook</p></div>
+          <div><h1 className="text-2xl font-bold">Cricket Scorer Pro</h1><p className="text-green-200 text-sm">Live · YouTube · 3× Facebook</p></div>
         </div>
         <div className="flex gap-2">
           <Btn variant="yellow" onClick={() => setView('setup')}><Plus size={16} /> New Match</Btn>
@@ -1299,8 +1307,26 @@ export default function App() {
           <input type="url" placeholder="YouTube stream URL (optional)" value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)} className="w-full px-3 py-2.5 border border-green-200 rounded-xl text-sm mt-2" />
         </div>
         <div>
-          <label className="text-sm font-semibold text-green-800 flex items-center gap-2 mb-2"><Share2 size={15} className="text-blue-600" /> Facebook Live <span className="text-xs text-green-400 font-normal">(optional)</span></label>
-          <input type="text" placeholder="Facebook Live Video ID (optional)" value={facebookLiveId} onChange={e => setFacebookLiveId(e.target.value)} className="w-full px-3 py-2.5 border border-green-200 rounded-xl text-sm" />
+          <label className="text-sm font-semibold text-green-800 flex items-center gap-2 mb-1"><Share2 size={15} className="text-blue-600" /> Facebook Live Pages <span className="text-xs text-green-400 font-normal">(up to 3, optional)</span></label>
+          <p className="text-xs text-gray-500 mb-2">Stream simultaneously to multiple Facebook pages</p>
+          <div className="space-y-3">
+            {fbStreams.map((s, i) => (
+              <div key={i} className="border border-blue-200 rounded-xl p-3 space-y-2 bg-blue-50/40">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-blue-700">Facebook Page {i + 1}</span>
+                  <button onClick={() => setFbStreams(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600"><X size={14} /></button>
+                </div>
+                <input type="text" placeholder="Page name (e.g. My Club Page)" value={s.page_name} onChange={e => setFbStreams(prev => prev.map((x, idx) => idx === i ? { ...x, page_name: e.target.value } : x))} className="w-full px-3 py-2 border border-blue-200 rounded-lg text-xs" />
+                <input type="text" placeholder="Page Access Token" value={s.access_token} onChange={e => setFbStreams(prev => prev.map((x, idx) => idx === i ? { ...x, access_token: e.target.value } : x))} className="w-full px-3 py-2 border border-blue-200 rounded-lg text-xs font-mono" />
+                <input type="text" placeholder="Live Video ID" value={s.live_video_id} onChange={e => setFbStreams(prev => prev.map((x, idx) => idx === i ? { ...x, live_video_id: e.target.value } : x))} className="w-full px-3 py-2 border border-blue-200 rounded-lg text-xs" />
+              </div>
+            ))}
+            {fbStreams.length < 3 && (
+              <button onClick={() => setFbStreams(prev => [...prev, { page_name: '', access_token: '', live_video_id: '' }])} className="w-full py-2.5 border-2 border-dashed border-blue-300 rounded-xl text-xs font-semibold text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-2 transition-all">
+                <Plus size={14} /> Add Facebook Page
+              </button>
+            )}
+          </div>
         </div>
         <Btn variant="primary" size="lg" className="w-full" disabled={!selectedTeam1 || !selectedTeam2} onClick={startMatch}><Play size={18} /> Start Match</Btn>
       </Card>
@@ -1495,16 +1521,23 @@ export default function App() {
           {/* Right panel */}
           <div className="space-y-3">
             <Card className="p-4">
-              <h3 className="font-bold text-green-900 text-xs mb-3 flex items-center gap-2"><Radio size={14} /> Live</h3>
+              <h3 className="font-bold text-green-900 text-xs mb-3 flex items-center gap-2"><Radio size={14} /> Live Platforms</h3>
               <div className="space-y-2">
                 <div className={`flex items-center justify-between p-2 rounded-lg ${activeMatch.youtube_broadcast_id ? 'bg-green-50' : 'bg-gray-50'}`}>
                   <span className="flex items-center gap-1.5 text-xs font-semibold"><Youtube size={13} className="text-red-500" /> YouTube</span>
                   <span className={`text-xs font-bold ${activeMatch.youtube_broadcast_id ? 'text-green-600' : 'text-gray-400'}`}>{activeMatch.youtube_broadcast_id ? '● LIVE' : 'Off'}</span>
                 </div>
-                <div className={`flex items-center justify-between p-2 rounded-lg ${activeMatch.facebook_live_id ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                  <span className="flex items-center gap-1.5 text-xs font-semibold"><Share2 size={13} className="text-blue-600" /> Facebook</span>
-                  <span className={`text-xs font-bold ${activeMatch.facebook_live_id ? 'text-blue-600' : 'text-gray-400'}`}>{activeMatch.facebook_live_id ? '● LIVE' : 'Off'}</span>
-                </div>
+                {activeFbStreams.length > 0 ? activeFbStreams.map(s => (
+                  <div key={s.id} className="flex items-center justify-between p-2 rounded-lg bg-blue-50">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold"><Share2 size={13} className="text-blue-600" /> <span className="truncate max-w-[80px]">{s.page_name}</span></span>
+                    <span className="text-xs font-bold text-blue-600">● LIVE</span>
+                  </div>
+                )) : (
+                  <div className={`flex items-center justify-between p-2 rounded-lg ${activeMatch.facebook_live_id ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                    <span className="flex items-center gap-1.5 text-xs font-semibold"><Share2 size={13} className="text-blue-600" /> Facebook</span>
+                    <span className={`text-xs font-bold ${activeMatch.facebook_live_id ? 'text-blue-600' : 'text-gray-400'}`}>{activeMatch.facebook_live_id ? '● LIVE' : 'Off'}</span>
+                  </div>
+                )}
               </div>
               {/* OBS Overlay Style Dropdown */}
               <div className="mt-3 space-y-1.5">
