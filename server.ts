@@ -38,6 +38,14 @@ db.exec(`
     FOREIGN KEY(team1_id) REFERENCES teams(id),
     FOREIGN KEY(team2_id) REFERENCES teams(id)
   );
+  CREATE TABLE IF NOT EXISTS facebook_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    page_name TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    live_video_id TEXT NOT NULL,
+    FOREIGN KEY(match_id) REFERENCES matches(id)
+  );
   CREATE TABLE IF NOT EXISTS innings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     match_id INTEGER,
@@ -102,17 +110,27 @@ async function updateYouTubeTitle(tokens: any, broadcastId: string, scoreText: s
   } catch (err: any) { console.error('YouTube update error:', err.message); }
 }
 
-async function postFacebookComment(liveVideoId: string, message: string) {
-  const token = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
-  if (!token || !liveVideoId) return;
+async function postFacebookComment(liveVideoId: string, message: string, token?: string) {
+  const accessToken = token || process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
+  if (!accessToken || !liveVideoId) return;
   try {
     const res = await fetch(`https://graph.facebook.com/v19.0/${liveVideoId}/comments`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, access_token: token })
+      body: JSON.stringify({ message, access_token: accessToken })
     });
     const data = await res.json() as any;
     if (data.error) console.error('FB error:', data.error.message);
   } catch (err: any) { console.error('Facebook post error:', err.message); }
+}
+
+async function postToAllFacebookStreams(matchId: number, message: string) {
+  const streams: any[] = db.prepare('SELECT * FROM facebook_streams WHERE match_id = ?').all(matchId);
+  await Promise.allSettled(streams.map(s => postFacebookComment(s.live_video_id, message, s.access_token)));
+  // Also post to legacy single facebook_live_id if set
+  const match: any = db.prepare('SELECT facebook_live_id FROM matches WHERE id = ?').get(matchId);
+  if (match?.facebook_live_id) {
+    await postFacebookComment(match.facebook_live_id, message);
+  }
 }
 
 function buildScoreText(match: any) {
@@ -175,6 +193,28 @@ async function startServer() {
   // ── Facebook ──────────────────────────────────────────────────────────────────
   app.post('/api/facebook/update', async (req, res) => {
     await postFacebookComment(req.body.live_id, req.body.text);
+    res.json({ success: true });
+  });
+
+  app.get('/api/matches/:id/facebook-streams', (req, res) => {
+    const streams = db.prepare('SELECT id, match_id, page_name, live_video_id FROM facebook_streams WHERE match_id = ?').all(req.params.id);
+    res.json(streams);
+  });
+
+  app.post('/api/matches/:id/facebook-streams', (req, res) => {
+    const { page_name, access_token, live_video_id } = req.body;
+    if (!page_name?.trim() || !access_token?.trim() || !live_video_id?.trim())
+      return res.status(400).json({ error: 'page_name, access_token and live_video_id are required' });
+    const existing = db.prepare('SELECT COUNT(*) as cnt FROM facebook_streams WHERE match_id = ?').get(req.params.id) as any;
+    if (existing.cnt >= 3) return res.status(400).json({ error: 'Maximum 3 Facebook streams per match' });
+    const result = db.prepare(
+      'INSERT INTO facebook_streams (match_id, page_name, access_token, live_video_id) VALUES (?, ?, ?, ?)'
+    ).run(req.params.id, page_name.trim(), access_token.trim(), live_video_id.trim());
+    res.json({ id: result.lastInsertRowid, match_id: Number(req.params.id), page_name, live_video_id });
+  });
+
+  app.delete('/api/facebook-streams/:id', (req, res) => {
+    db.prepare('DELETE FROM facebook_streams WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   });
 
@@ -288,12 +328,10 @@ async function startServer() {
           if (match.youtube_broadcast_id && req.cookies.google_tokens) {
             updateYouTubeTitle(JSON.parse(req.cookies.google_tokens), match.youtube_broadcast_id, scoreText).catch(console.error);
           }
-          if (match.facebook_live_id) {
-            let fbMsg = '';
-            if (is_wicket) fbMsg = `WICKET! (${wicket_type?.replace('_', ' ') || 'out'}) ${scoreText}`;
-            else if (is_valid_for_balls && ball_number === 6) fbMsg = `Over ${over_number + 1} complete: ${scoreText}`;
-            if (fbMsg) postFacebookComment(match.facebook_live_id, fbMsg).catch(console.error);
-          }
+          let fbMsg = '';
+          if (is_wicket) fbMsg = `WICKET! (${wicket_type?.replace('_', ' ') || 'out'}) ${scoreText}`;
+          else if (is_valid_for_balls && ball_number === 6) fbMsg = `Over ${over_number + 1} complete: ${scoreText}`;
+          if (fbMsg) postToAllFacebookStreams(innings.match_id, fbMsg).catch(console.error);
         }
       }
       res.json({ id: result.lastInsertRowid });
